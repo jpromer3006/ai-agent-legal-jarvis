@@ -8,7 +8,9 @@ one answer can fill several slots at once (see orchestrator.extract_facts).
 from __future__ import annotations
 
 import json
+import random
 import re
+import string
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -64,97 +66,239 @@ SLOT_LABELS = {
 
 
 # ---------------------------------------------------------------------------
-# Date normalizer: relative text -> ISO 8601
+# Date normalizer: relative text -> ISO 8601 with confidence
 # ---------------------------------------------------------------------------
-_RELATIVE_PATTERNS = {
-    r"\btoday\b": 0,
-    r"\byesterday\b": -1,
-    r"\b(\d+)\s+days?\s+ago\b": None,  # captured group
-    r"\blast\s+week\b": -7,
-    r"\blast\s+month\b": -30,
+
+@dataclass
+class DateResult:
+    """Result of date normalization with confidence level."""
+    iso: str | None       # ISO date string or None
+    raw: str              # original text
+    confidence: str       # "exact" | "assumed" | "vague"
+
+
+# Word numbers
+_WORD_NUMS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30,
 }
 
+# Vague phrases that should NOT produce a date
+_VAGUE_PHRASES = [
+    r"\ba\s+while\s+ago\b", r"\bsome\s+time\s+ago\b", r"\brecently\b",
+    r"\ba\s+few\s+(weeks?|months?)\s+ago\b",
+]
 
-def normalize_date(raw: str, now: datetime | None = None) -> tuple[str | None, str]:
-    """Return (iso_date or None, raw_text). Best effort, no guessing."""
+# Exact relative patterns (produce a real date)
+_EXACT_RELATIVE = [
+    (r"\btoday\b", 0),
+    (r"\bthe\s+day\s+before\s+yesterday\b", -2),
+    (r"\byesterday\b", -1),
+    (r"\b(\d+)\s+days?\s+ago\b", None),  # captured group
+]
+
+
+def normalize_date(raw: str, now: datetime | None = None) -> DateResult:
+    """Normalize a date string. Returns DateResult with confidence level.
+
+    confidence values:
+      "exact"   — unambiguous date parsed or exact relative (yesterday, 3 days ago)
+      "assumed" — year was assumed (e.g., "October 14" → current year)
+      "vague"   — too vague to compute a date (last month, a while ago)
+    """
     now = now or datetime.now()
     text = raw.strip().lower()
 
-    # Try direct parse first (e.g., "October 14, 2026", "2026-10-14", "10/14/2026")
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%B %d, %Y", "%b %d, %Y",
+    # Check for vague phrases first — these should ask for clarification
+    for pat in _VAGUE_PHRASES:
+        if re.search(pat, text):
+            return DateResult(iso=None, raw=raw, confidence="vague")
+
+    # "last week" and "last month" are vague — no exact date
+    if re.search(r"\blast\s+(week|month)\b", text):
+        return DateResult(iso=None, raw=raw, confidence="vague")
+
+    # Try direct parse with full year (exact)
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y",
                 "%B %d %Y", "%b %d %Y"):
         try:
-            return datetime.strptime(text, fmt).strftime("%Y-%m-%d"), raw
+            parsed = datetime.strptime(text, fmt)
+            # Reject future dates
+            if parsed.date() > now.date():
+                return DateResult(iso=None, raw=raw, confidence="vague")
+            return DateResult(iso=parsed.strftime("%Y-%m-%d"), raw=raw,
+                              confidence="exact")
         except ValueError:
             continue
 
-    # Relative patterns
-    for pat, delta in _RELATIVE_PATTERNS.items():
+    # Two-digit year formats — flag for confirmation
+    for fmt in ("%m/%d/%y",):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            if parsed.date() > now.date():
+                return DateResult(iso=None, raw=raw, confidence="vague")
+            return DateResult(iso=parsed.strftime("%Y-%m-%d"), raw=raw,
+                              confidence="assumed")
+        except ValueError:
+            continue
+
+    # Month + day without year (e.g., "October 14", "10/14") — assume current year
+    for fmt in ("%B %d", "%b %d", "%m/%d"):
+        try:
+            parsed = datetime.strptime(text, fmt).replace(year=now.year)
+            if parsed.date() > now.date():
+                parsed = parsed.replace(year=now.year - 1)
+            return DateResult(iso=parsed.strftime("%Y-%m-%d"), raw=raw,
+                              confidence="assumed")
+        except ValueError:
+            continue
+
+    # "Sept 30, 2026" variant
+    for fmt in ("%b %d, %Y", "%b %d %Y"):
+        try:
+            parsed = datetime.strptime(text.replace("sept", "sep"), fmt)
+            if parsed.date() > now.date():
+                return DateResult(iso=None, raw=raw, confidence="vague")
+            return DateResult(iso=parsed.strftime("%Y-%m-%d"), raw=raw,
+                              confidence="exact")
+        except ValueError:
+            continue
+
+    # Exact relative patterns
+    for pat, delta in _EXACT_RELATIVE:
         m = re.search(pat, text)
         if m:
             if delta is None:
                 delta = -int(m.group(1))
-            return (now + timedelta(days=delta)).strftime("%Y-%m-%d"), raw
+            iso = (now + timedelta(days=delta)).strftime("%Y-%m-%d")
+            return DateResult(iso=iso, raw=raw, confidence="exact")
 
-    return None, raw
+    # Word number days ago ("two days ago")
+    m = re.search(r"\b(" + "|".join(_WORD_NUMS) + r")\s+days?\s+ago\b", text)
+    if m:
+        delta = -_WORD_NUMS[m.group(1)]
+        iso = (now + timedelta(days=delta)).strftime("%Y-%m-%d")
+        return DateResult(iso=iso, raw=raw, confidence="exact")
+
+    return DateResult(iso=None, raw=raw, confidence="vague")
 
 
 # ---------------------------------------------------------------------------
-# MTA entity resolver
+# Public entity resolver (data-driven, word-boundary regex)
 # ---------------------------------------------------------------------------
-_MTA_ENTITIES: list[tuple[list[str], str]] = [
-    (["subway", "train", "j train", "a train", "b train", "c train", "d train",
-      "e train", "f train", "g train", "l train", "m train", "n train", "q train",
-      "r train", "s train", "w train", "z train", "1 train", "2 train", "3 train",
-      "4 train", "5 train", "6 train", "7 train",
-      "station", "platform", "turnstile", "mta subway",
-      "nyct bus", "city bus", "mta bus company"],
-     "New York City Transit Authority"),
-    (["lirr", "long island rail road", "long island railroad"],
-     "Long Island Rail Road"),
-    (["metro-north", "metro north", "metronorth", "mnr"],
-     "Metro-North Commuter Railroad"),
-    (["mta bus", "express bus"],
-     "MTA Bus Company"),
-    (["staten island railway", "sir ", "sir train"],
-     "Staten Island Rapid Transit Operating Authority"),
-]
+_ENTITIES_FILE = Path(__file__).resolve().parent.parent / "data" / "public_entities.json"
+_ENTITY_CACHE: dict | None = None
 
 
-def resolve_mta_entity(text: str) -> str | None:
-    """Map free text to the correct MTA respondent, or None if no match."""
-    low = " " + text.lower() + " "
-    for keywords, entity in _MTA_ENTITIES:
-        for kw in keywords:
-            if kw in low:
-                return entity
-    if "mta" in low:
-        return "New York City Transit Authority"
+def _load_entity_rules() -> dict:
+    global _ENTITY_CACHE
+    if _ENTITY_CACHE is None:
+        if _ENTITIES_FILE.exists():
+            _ENTITY_CACHE = json.loads(_ENTITIES_FILE.read_text())
+        else:
+            _ENTITY_CACHE = {"non_mta_guards": [], "entities": []}
+    return _ENTITY_CACHE
+
+
+def resolve_public_entity(text: str) -> str | None:
+    """Map free text to a public entity respondent, or None if uncertain.
+
+    Uses word-boundary regex rules from data/public_entities.json.
+    Most specific entities are checked first (LIRR before NYCT).
+    Non-MTA guards prevent false positives (Amtrak, gas station, etc.).
+    """
+    rules = _load_entity_rules()
+    low = text.lower()
+
+    # Check non-MTA guards first — if any match, return None
+    for guard in rules.get("non_mta_guards", []):
+        if re.search(r"\b" + re.escape(guard) + r"\b", low):
+            return None
+
+    # Check entities in order (most specific first)
+    for entity in rules.get("entities", []):
+        for pattern in entity["patterns"]:
+            if re.search(pattern, low):
+                return entity["name"]
+
     return None
 
 
+# Keep backward compat alias
+def resolve_mta_entity(text: str) -> str | None:
+    """Deprecated: use resolve_public_entity instead."""
+    return resolve_public_entity(text)
+
+
+def list_known_entities() -> list[str]:
+    """Return list of known public entity names for the UI picker."""
+    rules = _load_entity_rules()
+    return [e["name"] for e in rules.get("entities", [])]
+
+
+# ---------------------------------------------------------------------------
+# Intent detection: filter advice-seeking questions
+# ---------------------------------------------------------------------------
+_ADVICE_PATTERNS = [
+    r"\bshould i\b", r"\bwill i win\b", r"\bhow much.*(worth|get|money)\b",
+    r"\bdo i need a lawyer\b", r"\bwrite my\b", r"\bfile.*for me\b",
+    r"\bwhat should i do\b",
+]
+
+
+def is_advice_seeking(text: str) -> bool:
+    """Return True if the text looks like an advice-seeking question."""
+    low = text.strip().lower()
+    for pat in _ADVICE_PATTERNS:
+        if re.search(pat, low):
+            return True
+    # Pure question with no factual content
+    if low.endswith("?") and len(low.split()) < 12:
+        words = low.split()
+        question_starters = {"should", "will", "can", "do", "how", "is", "would"}
+        if words and words[0] in question_starters:
+            return True
+    return False
+
+
+ADVICE_REFUSAL = (
+    "I provide legal information, not legal advice. I can't tell you what to "
+    "do, predict outcomes, or evaluate your case. For personalized guidance, "
+    "contact a licensed attorney or a free legal aid organization like "
+    "LawHelpNY (lawhelpny.org) or the NYC Bar Legal Referral Service."
+)
+
+# ---------------------------------------------------------------------------
+# Case file
+# ---------------------------------------------------------------------------
 CASES_DIR = Path(__file__).resolve().parent.parent / "cases"
+
+
+def _random_suffix(n: int = 4) -> str:
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 
 @dataclass
 class CaseFile:
     created: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M"))
     facts: dict[str, str] = field(default_factory=dict)
-    areas: list = field(default_factory=list)          # list[AreaScore] or dicts from LLM
-    timeline: list[dict] = field(default_factory=list)  # {"date","event"}
-    transcript: list[dict] = field(default_factory=list)  # {"role","text"}
+    areas: list = field(default_factory=list)
+    timeline: list[dict] = field(default_factory=list)
+    transcript: list[dict] = field(default_factory=list)
     pending_slot: str | None = None
-    when_iso: str | None = None       # normalized ISO 8601 date
-    when_raw: str | None = None       # original text the user typed
+    when_iso: str | None = None
+    when_raw: str | None = None
     resolved_entity: str | None = None
     entity_confirmed: bool = False
+    entity_rejected: bool = False
     folder: Path | None = field(default=None, repr=False)
 
     def __post_init__(self):
+        # Folder path is computed but NOT created until save()
         if self.folder is None:
             ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            self.folder = CASES_DIR / f"case_{ts}"
-        self.folder.mkdir(parents=True, exist_ok=True)
+            self.folder = CASES_DIR / f"case_{ts}_{_random_suffix()}"
 
     @property
     def primary_area(self) -> str | None:
@@ -185,7 +329,11 @@ class CaseFile:
         return "\n".join(lines)
 
     def save(self) -> Path:
-        """Persist current case state to the case folder as JSON."""
+        """Persist current case state to the case folder as JSON.
+
+        Creates the folder lazily on first call.
+        """
+        self.folder.mkdir(parents=True, exist_ok=True)
         data = {
             "created": self.created,
             "facts": self.facts,

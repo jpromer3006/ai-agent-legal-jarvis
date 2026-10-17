@@ -17,10 +17,11 @@ the interface stays fully usable for design and demo work.
 from __future__ import annotations
 
 import json
+import logging
 import os
-import re
 import time
 from dataclasses import dataclass, field
+from typing import Any, Callable, TypeVar
 
 from .authority import Source, confidence, rank
 from .classifier import AreaScore, LAW_AREAS, baseline_classify
@@ -31,7 +32,10 @@ try:
 except ImportError:  # pragma: no cover
     anthropic = None
 
+logger = logging.getLogger("jarvis")
+
 MODEL = os.getenv("JARVIS_MODEL", "claude-sonnet-5-5")
+FAST_MODEL = os.getenv("JARVIS_FAST_MODEL", "claude-haiku-4-5-20251001")
 
 GUARDRAIL = """You are JARVIS, a legal information assistant. Hard rules:
 1. Provide legal information only, never legal advice. Do not tell the person what they
@@ -53,6 +57,84 @@ STATUTE_DOMAINS = [
     "law.cornell.edu", "law.justia.com", "courtlistener.com",
 ]
 
+T = TypeVar("T")
+
+
+def safe_call(fn: Callable[..., T], *args: Any, default: T = None,
+              retries: int = 1, **kwargs: Any) -> T:
+    """Call fn with retry and error handling. Never raises, never prints tracebacks.
+
+    Args:
+        fn: callable to invoke
+        default: value to return on failure
+        retries: number of retries after first failure (default 1)
+    Returns:
+        fn result on success, default on failure
+    """
+    for attempt in range(1 + retries):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            logger.warning("safe_call attempt %d/%d failed: %s", attempt + 1, 1 + retries, e)
+            if attempt == retries:
+                return default
+    return default
+
+
+# -- Tool schemas for structured output -----------------------------------
+
+EXTRACT_FACTS_TOOL = {
+    "name": "extract_facts",
+    "description": "Extract facts and timeline from a legal intake answer.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "facts": {
+                "type": "object",
+                "description": "Map of slot name to short factual summary extracted from the answer.",
+                "additionalProperties": {"type": "string"},
+            },
+            "timeline": {
+                "type": "array",
+                "description": "Timeline events extracted from the answer.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "date": {"type": "string"},
+                        "event": {"type": "string"},
+                    },
+                    "required": ["date", "event"],
+                },
+            },
+        },
+        "required": ["facts", "timeline"],
+    },
+}
+
+CLASSIFY_TOOL = {
+    "name": "classify_areas",
+    "description": "Classify the legal areas that apply to this account.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "areas": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "area": {"type": "string", "description": "Name from the provided list"},
+                        "score": {"type": "number", "description": "0 to 1 confidence"},
+                        "why": {"type": "string", "description": "One sentence reason. No citations."},
+                    },
+                    "required": ["area", "score", "why"],
+                },
+                "maxItems": 3,
+            },
+        },
+        "required": ["areas"],
+    },
+}
+
 
 @dataclass
 class Finding:
@@ -60,6 +142,7 @@ class Finding:
     body: str
     agent: str
     sources: list[Source] = field(default_factory=list)
+    consulted: list[Source] = field(default_factory=list)
     status: str = "pending"   # verified | partial | unsupported
 
     @property
@@ -89,50 +172,85 @@ class Orchestrator:
     def _log(self, agent: str, msg: str) -> None:
         self.log.append(LogEntry(time.strftime("%H:%M:%S"), agent, msg))
 
-    def _ask_json(self, system: str, prompt: str, max_tokens: int = 1200) -> dict:
-        resp = self.client.messages.create(
-            model=MODEL, max_tokens=max_tokens, system=system,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = "".join(b.text for b in resp.content if b.type == "text")
-        m = re.search(r"\{.*\}", text, re.S)
-        return json.loads(m.group(0)) if m else {}
+    def _ask_structured(self, system: str, prompt: str, tool: dict,
+                        model: str | None = None) -> dict:
+        """Call Claude with forced tool use and return the tool input as a dict.
 
-    def _search(self, agent: str, prompt: str, allowed: list[str] | None, uses: int) -> Finding:
-        tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": uses}
-        if allowed:
-            tool["allowed_domains"] = allowed
-        resp = self.client.messages.create(
-            model=MODEL, max_tokens=2500, system=GUARDRAIL,
-            messages=[{"role": "user", "content": prompt}], tools=[tool],
-        )
-        body, sources = [], []
+        Falls back to empty dict on any failure — never crashes.
+        """
+        def _call():
+            resp = self.client.messages.create(
+                model=model or FAST_MODEL,
+                max_tokens=1200,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+                tools=[tool],
+                tool_choice={"type": "tool", "name": tool["name"]},
+            )
+            for block in resp.content:
+                if block.type == "tool_use":
+                    return block.input
+            return {}
+
+        result = safe_call(_call, default={})
+        return result if isinstance(result, dict) else {}
+
+    def _search(self, agent: str, prompt: str, allowed: list[str] | None,
+                uses: int) -> Finding:
+        """Run a web search via Claude. Separates cited vs consulted sources."""
+        def _call():
+            tool = {"type": "web_search_20250305", "name": "web_search",
+                    "max_uses": uses}
+            if allowed:
+                tool["allowed_domains"] = allowed
+            return self.client.messages.create(
+                model=MODEL, max_tokens=2500, system=GUARDRAIL,
+                messages=[{"role": "user", "content": prompt}], tools=[tool],
+            )
+
+        resp = safe_call(_call, default=None)
+        if resp is None:
+            self._log(agent, "search failed — API error")
+            return Finding(title="", body="Search unavailable.", agent=agent)
+
+        body, cited, consulted = [], [], []
         for b in resp.content:
             if b.type == "text":
                 body.append(b.text)
                 for c in (getattr(b, "citations", None) or []):
-                    sources.append(Source(c.url, c.title or "", getattr(c, "cited_text", "") or "", agent))
-            elif b.type == "web_search_tool_result" and isinstance(b.content, list):
+                    cited.append(Source(
+                        c.url, c.title or "",
+                        getattr(c, "cited_text", "") or "", agent
+                    ))
+            elif (b.type == "web_search_tool_result"
+                  and isinstance(b.content, list)):
                 for r in b.content:
-                    sources.append(Source(r.url, r.title or "", "", agent))
-        return Finding(title="", body="".join(body).strip(), agent=agent, sources=rank(sources))
+                    consulted.append(Source(r.url, r.title or "", "", agent))
+
+        return Finding(
+            title="", body="".join(body).strip(), agent=agent,
+            sources=rank(cited), consulted=rank(consulted),
+        )
 
     # ------------------------------------------------------------ IntakeAgent
     def extract_facts(self, case: CaseFile, answer: str) -> None:
+        """Extract facts from user answer. Uses structured tool output online."""
         slot = case.pending_slot or "narrative"
         case.transcript.append({"role": "user", "text": answer})
+
         if not self.online:
             case.facts[slot] = answer
             self._log("IntakeAgent", f"filled {slot} (offline)")
             facts = {slot: answer}
         else:
             slots = [s for s, _ in case.question_queue()]
-            data = self._ask_json(
-                "You extract facts from a legal intake answer. Return only JSON.",
+            data = self._ask_structured(
+                "You extract facts from a legal intake answer.",
                 f"Known facts: {json.dumps(case.facts)}\nSlots: {slots}\n"
                 f"The person was asked about '{slot}'. Their answer: {answer!r}\n"
-                'Return {"facts": {slot: short factual summary}, "timeline": [{"date": "...", "event": "..."}]}. '
-                "Only include slots the answer actually addresses. Use the person's words, no guessing.",
+                "Only include slots the answer actually addresses. "
+                "Use the person's words, no guessing.",
+                EXTRACT_FACTS_TOOL,
             )
             facts = data.get("facts") or {slot: answer}
             case.facts.update({k: v for k, v in facts.items() if v})
@@ -140,19 +258,25 @@ class Orchestrator:
             case.timeline.extend(data.get("timeline", []))
 
         # Post-extraction: normalize date and resolve entity
-        from .intake import normalize_date, resolve_mta_entity
+        from .intake import normalize_date, resolve_public_entity
         if "when" in case.facts and case.when_iso is None:
-            iso, raw = normalize_date(case.facts["when"])
-            case.when_iso = iso
-            case.when_raw = raw
-            if iso:
-                case.facts["when"] = f"{iso} ({raw})"
-                self._log("IntakeAgent", f"date normalized: {iso}")
-        if "public_entity" in case.facts and not case.resolved_entity:
-            combined = " ".join([case.facts.get("narrative", ""),
-                                 case.facts.get("where", ""),
-                                 case.facts.get("public_entity", "")])
-            resolved = resolve_mta_entity(combined)
+            result = normalize_date(case.facts["when"])
+            case.when_iso = result.iso
+            case.when_raw = result.raw
+            if result.iso and result.confidence == "exact":
+                case.facts["when"] = f"{result.iso} ({result.raw})"
+                self._log("IntakeAgent", f"date normalized: {result.iso}")
+            elif result.confidence == "vague":
+                self._log("IntakeAgent", f"date is vague: '{result.raw}' — will ask for exact date")
+        if ("public_entity" in case.facts
+                and not case.resolved_entity
+                and not case.entity_rejected):
+            combined = " ".join([
+                case.facts.get("narrative", ""),
+                case.facts.get("where", ""),
+                case.facts.get("public_entity", ""),
+            ])
+            resolved = resolve_public_entity(combined)
             if resolved:
                 case.resolved_entity = resolved
                 self._log("IntakeAgent", f"entity resolved: {resolved}")
@@ -160,31 +284,49 @@ class Orchestrator:
 
     # ------------------------------------------------------- ClassifierAgent
     def classify(self, case: CaseFile) -> None:
+        """Classify law areas. Falls back to keyword baseline on any API failure."""
         text = " ".join(case.facts.values())
         base = baseline_classify(text)
+
         if not self.online:
             case.areas = base
-            self._log("ClassifierAgent", "keyword baseline: " + (", ".join(a.area for a in base) or "no signal yet"))
+            self._log("ClassifierAgent",
+                       "keyword baseline: " + (", ".join(a.area for a in base) or "no signal yet"))
             return
-        data = self._ask_json(
-            GUARDRAIL + "\nReturn only JSON.",
-            f"Account of events:\n{case.summary_text()}\n\nAreas: {list(LAW_AREAS)}\n"
-            'Return {"areas": [{"area": name from list, "score": 0..1, "why": one sentence}]} '
-            "ranked, max 3. Multiple areas can apply.",
-        )
-        areas = []
-        for a in data.get("areas", []):
-            if a.get("area") in LAW_AREAS:
-                s = AreaScore(a["area"], float(a.get("score", 0)), [])
-                s.why = a.get("why", "")
-                areas.append(s)
-        case.areas = areas or base
-        self._log("ClassifierAgent", "areas: " + ", ".join(f"{a.area} {a.score:.0%}" for a in case.areas))
+
+        def _llm_classify():
+            data = self._ask_structured(
+                GUARDRAIL + "\nDo NOT include any statute citations in your reasoning.",
+                f"Account of events:\n{case.summary_text()}\n\n"
+                f"Areas: {list(LAW_AREAS)}\n"
+                "Classify which areas of law apply. Max 3, ranked by relevance.",
+                CLASSIFY_TOOL,
+            )
+            areas = []
+            for a in data.get("areas", []):
+                if a.get("area") in LAW_AREAS:
+                    s = AreaScore(a["area"], float(a.get("score", 0)), [])
+                    s.why = a.get("why", "")
+                    areas.append(s)
+            return areas if areas else None
+
+        areas = safe_call(_llm_classify, default=None)
+        if areas:
+            case.areas = areas
+            self._log("ClassifierAgent",
+                       "areas: " + ", ".join(f"{a.area} {a.score:.0%}" for a in case.areas))
+        else:
+            case.areas = base
+            self._log("ClassifierAgent",
+                       "LLM failed, keyword fallback: " + ", ".join(a.area for a in base))
 
     # ---------------------------------------------------------- research run
-    def research(self, case: CaseFile, jurisdiction: str = "New York, NY") -> list[Finding]:
+    def research(self, case: CaseFile,
+                 jurisdiction: str = "New York, NY") -> list[Finding]:
+        """Dispatch StatuteAgent and ContextAgent, then validate findings."""
         self.findings = []
         area = case.primary_area or "General"
+
         if not self.online:
             self.findings = demo_findings(area)
             self._log("StatuteAgent", "offline demo findings loaded")
@@ -192,13 +334,15 @@ class Orchestrator:
             return self.findings
 
         facts = case.summary_text()
+
         self._log("StatuteAgent", f"searching primary law for {area} in {jurisdiction}")
         statute = self._search(
             "StatuteAgent",
             f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
-            "Identify the statutes, regulations, municipal codes, and official procedures that "
-            "govern a matter like this, including any filing or notice deadlines. Cite each one.",
-            STATUTE_DOMAINS, 6,
+            "Identify the statutes, regulations, municipal codes, and official "
+            "procedures that govern a matter like this, including any filing or "
+            "notice deadlines. Cite each one.",
+            STATUTE_DOMAINS, 4,
         )
         statute.title = f"Governing law: {area}"
         self.findings.append(statute)
@@ -207,9 +351,10 @@ class Orchestrator:
         context = self._search(
             "ContextAgent",
             f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
-            "Find plain language guides from legal aid or bar associations, recent news, and "
-            "reputable explainer videos about this kind of matter. Label which are which.",
-            None, 4,
+            "Find plain language guides from legal aid or bar associations, "
+            "recent news, and reputable explainer videos about this kind of "
+            "matter. Label which are which.",
+            None, 2,
         )
         context.title = "Plain language context"
         self.findings.append(context)
@@ -219,44 +364,56 @@ class Orchestrator:
 
     # -------------------------------------------------------- ValidatorAgent
     def _validate(self) -> None:
+        """Validate findings using only cited sources (not all consulted)."""
         for f in self.findings:
-            tiers = {s.tier for s in f.sources}
-            if 1 in tiers:
+            cited_tiers = {s.tier for s in f.sources}
+            cited_with_text = [s for s in f.sources if s.snippet]
+            if cited_with_text and (1 in cited_tiers or 2 in cited_tiers):
                 f.status = "verified"
-            elif 2 in tiers:
+            elif 1 in cited_tiers or 2 in cited_tiers:
+                f.status = "partial"
+            elif 3 in cited_tiers:
                 f.status = "partial"
             else:
                 f.status = "unsupported"
-            self._log("ValidatorAgent", f"'{f.title}' {f.status.upper()} ({len(f.sources)} sources, conf {f.score:.0%})")
+            self._log("ValidatorAgent",
+                       f"'{f.title}' {f.status.upper()} "
+                       f"({len(f.sources)} cited, "
+                       f"{len(f.consulted)} consulted, "
+                       f"conf {f.score:.0%})")
 
 
 def demo_findings(area: str) -> list[Finding]:
-    """Offline sample so the HUD renders without an API key. Clearly labeled."""
+    """Offline sample so the HUD renders without an API key.
+
+    Status is always 'unsupported' for demo data — never 'verified'.
+    """
     s = lambda u, t, a: Source(u, t, "", a)
     return [
         Finding(
             title=f"[DEMO] Governing law: {area}",
-            body=("Sample output. With an API key set, the StatuteAgent searches only government, "
-                  "court, and official code sources and cites each statute it names. Claims against "
-                  "public entities in New York generally require a notice of claim within a short "
-                  "statutory window, so confirm deadlines with a licensed attorney immediately."),
-            agent="StatuteAgent", status="verified",
+            body=(
+                "DEMO DATA — NOT REAL LAW. With an API key set, the "
+                "StatuteAgent searches only government, court, and official "
+                "code sources and cites each statute it names."
+            ),
+            agent="StatuteAgent", status="unsupported",
             sources=rank([
-                s("https://www.nysenate.gov/legislation/laws/GMU/50-E", "NY General Municipal Law 50-E", "StatuteAgent"),
-                s("https://www.nycourts.gov/courthelp/", "NY CourtHelp", "StatuteAgent"),
-                s("https://www.law.cornell.edu/wex/negligence", "Negligence, Wex, Cornell LII", "StatuteAgent"),
+                s("https://www.nysenate.gov/legislation/laws/GMU/50-E",
+                  "NY General Municipal Law 50-E", "StatuteAgent"),
+                s("https://www.nycourts.gov/courthelp/",
+                  "NY CourtHelp", "StatuteAgent"),
             ]),
         ),
         Finding(
             title="[DEMO] Plain language context",
-            body=("Sample output. The ContextAgent gathers legal aid guides, news, and videos. "
-                  "Community sources appear here for context only and never count as authority."),
-            agent="ContextAgent", status="partial",
+            body=(
+                "DEMO DATA — NOT REAL LAW. The ContextAgent gathers legal "
+                "aid guides, news, and videos."
+            ),
+            agent="ContextAgent", status="unsupported",
             sources=rank([
                 s("https://www.lawhelpny.org/", "LawHelpNY", "ContextAgent"),
-                s("https://www.reuters.com/legal/", "Reuters Legal", "ContextAgent"),
-                s("https://www.youtube.com/results?search_query=notice+of+claim+new+york", "YouTube explainers", "ContextAgent"),
-                s("https://www.reddit.com/r/legaladvice/", "r/legaladvice", "ContextAgent"),
             ]),
         ),
     ]

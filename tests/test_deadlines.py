@@ -69,38 +69,40 @@ class TestComputeDeadline:
 # normalize_date
 # ---------------------------------------------------------------------------
 class TestNormalizeDate:
+    """Updated for DateResult return type (P0.6)."""
+
     def test_today(self):
         now = datetime(2026, 10, 14, 14, 30)
-        iso, raw = normalize_date("today at 2:30 pm", now=now)
-        assert iso == "2026-10-14"
-        assert raw == "today at 2:30 pm"
+        r = normalize_date("today at 2:30 pm", now=now)
+        assert r.iso == "2026-10-14"
+        assert r.raw == "today at 2:30 pm"
 
     def test_yesterday(self):
         now = datetime(2026, 10, 14)
-        iso, _ = normalize_date("yesterday", now=now)
-        assert iso == "2026-10-13"
+        r = normalize_date("yesterday", now=now)
+        assert r.iso == "2026-10-13"
 
     def test_n_days_ago(self):
         now = datetime(2026, 10, 14)
-        iso, _ = normalize_date("3 days ago", now=now)
-        assert iso == "2026-10-11"
+        r = normalize_date("3 days ago", now=now)
+        assert r.iso == "2026-10-11"
 
     def test_explicit_date(self):
-        iso, _ = normalize_date("2026-10-01")
-        assert iso == "2026-10-01"
+        r = normalize_date("2026-10-01")
+        assert r.iso == "2026-10-01"
 
     def test_us_format(self):
-        iso, _ = normalize_date("10/14/2026")
-        assert iso == "2026-10-14"
+        r = normalize_date("10/14/2026")
+        assert r.iso == "2026-10-14"
 
     def test_unparseable_returns_none(self):
-        iso, raw = normalize_date("some random text")
-        assert iso is None
-        assert raw == "some random text"
+        r = normalize_date("some random text")
+        assert r.iso is None
+        assert r.raw == "some random text"
 
     def test_raw_preserved(self):
-        _, raw = normalize_date("  today at 2:30 pm  ")
-        assert raw == "  today at 2:30 pm  "
+        r = normalize_date("  today at 2:30 pm  ")
+        assert r.raw == "  today at 2:30 pm  "
 
 
 # ---------------------------------------------------------------------------
