@@ -1043,7 +1043,16 @@ if case.primary_area:
                         "expired": _dl.is_expired,
                     }
         _proc_result = locate_stages(case.facts, _actions, _proc, _dl_data)
-        _map_html = render_procedure_map(_proc_result)
+
+        # Stage selector
+        _stage_names = [s.stage["title"] for s in _proc_result.stages]
+        _default_idx = max(_proc_result.current_index, 0)
+        _selected = st.pills("Stage", _stage_names,
+                             default=_stage_names[_default_idx] if _stage_names else None,
+                             key="proc_stage_select", label_visibility="collapsed")
+        _sel_idx = _stage_names.index(_selected) if _selected in _stage_names else _default_idx
+
+        _map_html = render_procedure_map(_proc_result, selected_stage=_sel_idx)
         st.markdown(_map_html, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ voice follow-up chat (after research)

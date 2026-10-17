@@ -131,17 +131,35 @@ def render_procedure_map(result: ProcedureResult, selected_stage: int = -1) -> s
                 f'stroke-dasharray="4 3"/>'
             )
 
-        # Stage title below node
+        # Stage title below node — wrap long titles across two lines
         title = esc(stage["title"])
-        # Truncate long titles
-        if len(title) > 14:
-            title = title[:12] + "…"
-        svg_parts.append(
-            f'<text x="{cx}" y="{cy + node_r + 16}" text-anchor="middle" '
-            f'font-family="Share Tech Mono,monospace" font-size="9" '
-            f'fill="{"#29e6ff" if ss.status in ("done","current") else "#3a5a6a"}" '
-            f'letter-spacing=".05em">{title}</text>'
-        )
+        fill = "#29e6ff" if ss.status in ("done", "current") else "#3a5a6a"
+        if len(title) > 16:
+            # Split into two lines at a natural break
+            mid = len(title) // 2
+            split = title.rfind(" ", 0, mid + 4)
+            if split < 3:
+                split = title.find(" ", mid)
+            if split > 0:
+                line1, line2 = title[:split], title[split + 1:]
+            else:
+                line1, line2 = title[:14], title[14:]
+            svg_parts.append(
+                f'<text x="{cx}" y="{cy + node_r + 15}" text-anchor="middle" '
+                f'font-family="Share Tech Mono,monospace" font-size="11" '
+                f'fill="{fill}" letter-spacing=".03em">{line1}</text>'
+            )
+            svg_parts.append(
+                f'<text x="{cx}" y="{cy + node_r + 27}" text-anchor="middle" '
+                f'font-family="Share Tech Mono,monospace" font-size="11" '
+                f'fill="{fill}" letter-spacing=".03em">{line2}</text>'
+            )
+        else:
+            svg_parts.append(
+                f'<text x="{cx}" y="{cy + node_r + 16}" text-anchor="middle" '
+                f'font-family="Share Tech Mono,monospace" font-size="11" '
+                f'fill="{fill}" letter-spacing=".03em">{title}</text>'
+            )
 
         # Deadline chip
         if ss.deadline_date:
@@ -190,28 +208,25 @@ def render_procedure_map(result: ProcedureResult, selected_stage: int = -1) -> s
         stage = sel.stage
         detail_html = _render_detail_card(sel)
 
-    return f"""
-    <div class="panel" style="overflow-x:auto;">
-      <div class="ptitle">LEGAL PROCEDURE MAP
-        <span>{esc(result.procedure.get('title', ''))}</span></div>
-      <div style="overflow-x:auto; padding:10px 0;">
-        {svg_html}
-      </div>
-      {detail_html}
-      <div class="disclaimer" style="margin-top:8px;">
-        This is an educational overview of a typical legal process.
-        It is not legal advice. Confirm all steps with a licensed attorney or legal aid.
-      </div>
-    </div>
-    """
+    # IMPORTANT: no leading whitespace — st.markdown treats indented HTML as code
+    return (
+'<div class="panel" style="overflow-x:auto;">'
+'<div class="ptitle">LEGAL PROCEDURE MAP'
+f' <span>{esc(result.procedure.get("title", ""))}</span></div>'
+f'<div style="overflow-x:auto; padding:10px 0;">{svg_html}</div>'
+f'{detail_html}'
+'<div class="disclaimer" style="margin-top:8px;">'
+'This is an educational overview of a typical legal process. '
+'It is not legal advice. Confirm all steps with a licensed attorney or legal aid.'
+'</div></div>'
+    )
 
 
 def _render_detail_card(ss: StageStatus) -> str:
-    """Render the detail card for a selected stage."""
+    """Render the detail card for a selected stage. No leading whitespace."""
     stage = ss.stage
     parts = []
 
-    # Header
     status_color = {
         "done": "#3dffb5", "current": "#29e6ff",
         "upcoming": "#5f8ea3", "unknown": "#5f8ea3",
@@ -221,82 +236,81 @@ def _render_detail_card(ss: StageStatus) -> str:
         "upcoming": "UPCOMING", "unknown": "UNKNOWN",
     }.get(ss.status, "")
 
-    parts.append(f'''
-    <div style="border-top:1px solid rgba(41,230,255,.2); margin-top:12px; padding-top:12px;">
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-        <span style="font-family:Orbitron,sans-serif; font-size:13px; color:#29e6ff;
-          letter-spacing:.15em;">{esc(stage["title"]).upper()}</span>
-        <span style="font-size:9px; padding:2px 8px; border:1px solid {status_color};
-          color:{status_color}; letter-spacing:.1em; border-radius:2px;">{status_label}</span>
-      </div>
-      <div style="font-size:13px; color:#e9fbff; line-height:1.5; margin-bottom:8px;">
-        {esc(stage.get("plain", ""))}</div>
-    ''')
+    parts.append(
+        f'<div style="border-top:1px solid rgba(41,230,255,.2); margin-top:12px; padding-top:12px;">'
+        f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
+        f'<span style="font-family:Orbitron,sans-serif; font-size:13px; color:#29e6ff; '
+        f'letter-spacing:.15em;">{esc(stage["title"]).upper()}</span>'
+        f'<span style="font-size:9px; padding:2px 8px; border:1px solid {status_color}; '
+        f'color:{status_color}; letter-spacing:.1em; border-radius:2px;">{status_label}</span>'
+        f'</div>'
+        f'<div style="font-size:13px; color:#e9fbff; line-height:1.5; margin-bottom:8px;">'
+        f'{esc(stage.get("plain", ""))}</div>'
+    )
 
-    # Deadline
     if ss.deadline_date:
         dl_color = "#ff4d6d" if ss.is_expired else "#ffb347"
         days = "EXPIRED" if ss.is_expired else f"{ss.days_remaining} days remaining"
-        parts.append(f'''
-        <div style="border:1px solid {dl_color}; padding:6px 10px; margin:6px 0;
-          background:rgba(255,179,71,.06); font-size:12px;">
-          <span style="color:{dl_color}; font-family:Orbitron,sans-serif;
-            font-size:11px; letter-spacing:.1em;">DEADLINE: {esc(ss.deadline_date)}</span>
-          <span style="color:{dl_color}; margin-left:8px;">{days}</span>
-        </div>''')
+        parts.append(
+            f'<div style="border:1px solid {dl_color}; padding:6px 10px; margin:6px 0; '
+            f'background:rgba(255,179,71,.06); font-size:12px;">'
+            f'<span style="color:{dl_color}; font-family:Orbitron,sans-serif; '
+            f'font-size:11px; letter-spacing:.1em;">DEADLINE: {esc(ss.deadline_date)}</span>'
+            f'<span style="color:{dl_color}; margin-left:8px;">{days}</span></div>'
+        )
         if ss.is_expired:
-            parts.append('''
-            <div style="font-size:11px; color:#ff4d6d; margin:4px 0;">
-              Contact a licensed attorney, legal aid, or a court help center now.
-              Other paths may exist.</div>''')
+            parts.append(
+                '<div style="font-size:11px; color:#ff4d6d; margin:4px 0;">'
+                'Contact a licensed attorney, legal aid, or a court help center now. '
+                'Other paths may exist.</div>'
+            )
 
-    # What to anticipate
     anticipate = stage.get("anticipate", [])
     if anticipate:
         items = "".join(f'<li style="margin:3px 0;">{esc(a)}</li>' for a in anticipate)
-        parts.append(f'''
-        <div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em; margin-top:8px;">
-          WHAT TO ANTICIPATE</div>
-        <ul style="font-size:12px; color:#d8f6ff; margin:4px 0 8px 16px; padding:0;">
-          {items}</ul>''')
+        parts.append(
+            '<div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em; margin-top:8px;">'
+            'WHAT TO ANTICIPATE</div>'
+            f'<ul style="font-size:12px; color:#d8f6ff; margin:4px 0 8px 16px; padding:0;">{items}</ul>'
+        )
 
-    # Documents
     docs = stage.get("documents", [])
     if docs:
         items = "".join(f'<li style="margin:2px 0;">{esc(d)}</li>' for d in docs)
-        parts.append(f'''
-        <div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em;">
-          DOCUMENTS TO GATHER</div>
-        <ul style="font-size:12px; color:#d8f6ff; margin:4px 0 8px 16px; padding:0;">
-          {items}</ul>''')
+        parts.append(
+            '<div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em;">'
+            'DOCUMENTS TO GATHER</div>'
+            f'<ul style="font-size:12px; color:#d8f6ff; margin:4px 0 8px 16px; padding:0;">{items}</ul>'
+        )
 
-    # Who you deal with
     who = stage.get("who_you_deal_with", [])
     if who:
-        parts.append(f'''
-        <div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em;">
-          WHO YOU TYPICALLY DEAL WITH</div>
-        <div style="font-size:12px; color:#d8f6ff; margin:4px 0 8px;">
-          {", ".join(esc(w) for w in who)}</div>''')
+        parts.append(
+            '<div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em;">'
+            'WHO YOU TYPICALLY DEAL WITH</div>'
+            f'<div style="font-size:12px; color:#d8f6ff; margin:4px 0 8px;">'
+            f'{", ".join(esc(w) for w in who)}</div>'
+        )
 
-    # Sources
     sources = stage.get("sources", [])
     if sources:
-        src_html = ""
-        for s in sources:
-            src_html += (f'<a href="{esc(s["url"])}" target="_blank" '
-                         f'style="color:#29e6ff; font-size:11px; margin-right:12px;">'
-                         f'{esc(s["label"])}</a>')
-        parts.append(f'''
-        <div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em;">SOURCES</div>
-        <div style="margin:4px 0 8px;">{src_html}</div>''')
+        src_html = "".join(
+            f'<a href="{esc(s["url"])}" target="_blank" '
+            f'style="color:#29e6ff; font-size:11px; margin-right:12px;">'
+            f'{esc(s["label"])}</a>'
+            for s in sources
+        )
+        parts.append(
+            '<div style="font-size:11px; color:#5f8ea3; letter-spacing:.1em;">SOURCES</div>'
+            f'<div style="margin:4px 0 8px;">{src_html}</div>'
+        )
 
-    # Typical duration
     dur = stage.get("typical_duration")
     if dur:
-        parts.append(f'''
-        <div style="font-size:11px; color:#5f8ea3; margin-top:4px;">
-          TYPICAL DURATION: <span style="color:#d8f6ff;">{esc(dur)}</span></div>''')
+        parts.append(
+            f'<div style="font-size:11px; color:#5f8ea3; margin-top:4px;">'
+            f'TYPICAL DURATION: <span style="color:#d8f6ff;">{esc(dur)}</span></div>'
+        )
 
     parts.append('</div>')
-    return "\n".join(parts)
+    return "".join(parts)
