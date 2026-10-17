@@ -50,11 +50,16 @@ IV. POSSIBLE OUTCOMES AND OPEN QUESTIONS
 State possible outcomes, open questions, and areas needing further research.
 
 V. SOURCES
-List every source cited, numbered as footnotes [1], [2], etc. with full URLs.
+List every source cited, numbered as footnotes. Each source MUST include:
+  [n] Title — https://full.url.here
+Example:
+  [1] NY GML §50-e — https://www.nysenate.gov/legislation/laws/GMU/50-E
+  [2] NYC Comptroller Claims FAQ — https://comptroller.nyc.gov/claims/
 
 RULES:
 - Use footnote markers [1], [2], etc. inline when citing sources
 - Every legal claim must have a citation
+- Every footnote in SOURCES must include the full https:// URL
 - Be thorough but concise
 - Note any gaps in the research or areas needing further investigation
 - Include both favorable and unfavorable authority
@@ -79,7 +84,7 @@ def claude_legal_chat(messages: list[dict], system: str = "",
         tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
 
     resp = client.messages.create(
-        model=MODEL, max_tokens=4000, system=system or LAWYER_SYSTEM,
+        model=MODEL, max_tokens=8000, system=system or LAWYER_SYSTEM,
         messages=messages, tools=tools if tools else anthropic.NOT_GIVEN,
     )
 
@@ -141,9 +146,15 @@ def generate_irac_memo(case_summary: str, findings: list[dict],
         f"{discussion_ctx}\n\n"
         f"Attorney name: {attorney_name}\n"
         f"Date: {datetime.now().strftime('%B %d, %Y')}\n\n"
-        f"Generate the IRAC memo now. Use [n] footnote markers inline referencing "
-        f"the source numbers above. Make every source a clickable reference in the "
-        f"SOURCES section."
+        f"Generate the IRAC memo now. Rules for sources:\n"
+        f"1. Use [n] footnote markers inline whenever citing a source.\n"
+        f"2. In the V. SOURCES section, list EVERY cited source as:\n"
+        f"   [n] Title — full URL\n"
+        f"   Example: [1] NY GML §50-e — https://www.nysenate.gov/legislation/laws/GMU/50-E\n"
+        f"3. Every footnote MUST include the full https:// URL.\n"
+        f"4. Do not omit URLs. The reader needs clickable links to verify each source.\n"
+        f"5. ALWAYS include the V. SOURCES section at the end. It is mandatory.\n"
+        f"6. Keep analysis concise so there is room for the full SOURCES section."
     )
 
     text, extra_sources = claude_legal_chat(
@@ -216,33 +227,46 @@ def memo_to_pdf(memo_text: str, case_title: str = "Legal Memorandum") -> bytes:
     lines = memo_text.split("\n")
     for line in lines:
         stripped = line.strip()
-        if not stripped:
+        if not stripped or stripped == "---":
             story.append(Spacer(1, 6))
             continue
 
+        # Strip markdown formatting for PDF
+        clean = stripped
+        clean = re.sub(r"^#{1,4}\s+", "", clean)  # ## headings
+        clean = re.sub(r"\*\*(.+?)\*\*", r"\1", clean)  # **bold**
+        clean = re.sub(r"\*(.+?)\*", r"\1", clean)  # *italic*
+
         # Detect headings
-        if stripped.startswith("MEMORANDUM OF LAW"):
-            story.append(Paragraph(stripped, styles["MemoTitle"]))
+        if clean.startswith("MEMORANDUM OF LAW"):
+            story.append(Paragraph(clean, styles["MemoTitle"]))
             continue
-        if re.match(r"^(I{1,3}V?|V)\.\s", stripped) or stripped.startswith("V. SOURCES"):
+        if re.match(r"^(I{1,3}V?|V)\.\s", clean) or clean.startswith("V. SOURCES"):
             story.append(Spacer(1, 8))
             story.append(HRFlowable(width="100%", thickness=0.5, color=HexColor("#cccccc")))
-            story.append(Paragraph(stripped, styles["MemoHeading"]))
+            story.append(Paragraph(clean, styles["MemoHeading"]))
             continue
-        if stripped.startswith(("TO:", "FROM:", "DATE:", "RE:")):
-            story.append(Paragraph(stripped, styles["MemoHeader"]))
+        if clean.startswith(("TO:", "FROM:", "DATE:", "RE:")):
+            story.append(Paragraph(clean, styles["MemoHeader"]))
             continue
 
-        # Source lines with URLs — make clickable
-        url_match = re.search(r'(https?://\S+)', stripped)
-        if url_match and stripped.startswith("["):
-            url = url_match.group(1)
-            display = stripped.replace(url, f'<a href="{url}" color="#0055aa">{url}</a>')
+        # Any line with a URL — make it clickable
+        url_match = re.search(r'(https?://\S+)', clean)
+        if url_match:
+            url = url_match.group(1).rstrip(".,;)")
+            # Escape the non-URL parts for XML safety
+            before = clean[:url_match.start()]
+            after = clean[url_match.start() + len(url_match.group(1)):]
+            safe_before = before.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe_after = after.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            # Bold footnote refs in the before text
+            safe_before = re.sub(r'\[(\d+)\]', r'<b>[\1]</b>', safe_before)
+            display = f'{safe_before}<a href="{url}" color="#0055aa">{url}</a>{safe_after}'
             story.append(Paragraph(display, styles["Footnote"]))
             continue
 
         # Regular body text — escape XML entities
-        safe = stripped.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe = clean.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         # Bold footnote refs
         safe = re.sub(r'\[(\d+)\]', r'<b>[\1]</b>', safe)
         story.append(Paragraph(safe, styles["MemoBody"]))
