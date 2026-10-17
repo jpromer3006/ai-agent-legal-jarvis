@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, TypeVar
 
@@ -36,6 +37,8 @@ logger = logging.getLogger("jarvis")
 
 MODEL = os.getenv("JARVIS_MODEL", "claude-sonnet-5-5")
 FAST_MODEL = os.getenv("JARVIS_FAST_MODEL", "claude-haiku-4-5-20251001")
+# Note: check `anthropic model list` for current IDs. As of Oct 2026,
+# claude-haiku-4-5-20251001 is the latest Haiku.
 
 GUARDRAIL = """You are JARVIS, a legal information assistant. Hard rules:
 1. Provide legal information only, never legal advice. Do not tell the person what they
@@ -177,12 +180,16 @@ class Orchestrator:
         """Call Claude with forced tool use and return the tool input as a dict.
 
         Falls back to empty dict on any failure — never crashes.
+        Uses prompt caching on the system prompt for speed.
         """
         def _call():
+            # Use cache_control on system prompt for repeated calls
+            sys_msg = [{"type": "text", "text": system,
+                        "cache_control": {"type": "ephemeral"}}]
             resp = self.client.messages.create(
                 model=model or FAST_MODEL,
                 max_tokens=1200,
-                system=system,
+                system=sys_msg,
                 messages=[{"role": "user", "content": prompt}],
                 tools=[tool],
                 tool_choice={"type": "tool", "name": tool["name"]},
@@ -323,7 +330,10 @@ class Orchestrator:
     # ---------------------------------------------------------- research run
     def research(self, case: CaseFile,
                  jurisdiction: str = "New York, NY") -> list[Finding]:
-        """Dispatch StatuteAgent and ContextAgent, then validate findings."""
+        """Dispatch StatuteAgent and ContextAgent in parallel, then validate.
+
+        Uses ThreadPoolExecutor to run both agents concurrently.
+        """
         self.findings = []
         area = case.primary_area or "General"
 
@@ -334,32 +344,48 @@ class Orchestrator:
             return self.findings
 
         facts = case.summary_text()
+        t_start = time.time()
 
-        self._log("StatuteAgent", f"searching primary law for {area} in {jurisdiction}")
-        statute = self._search(
-            "StatuteAgent",
-            f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
-            "Identify the statutes, regulations, municipal codes, and official "
-            "procedures that govern a matter like this, including any filing or "
-            "notice deadlines. Cite each one.",
-            STATUTE_DOMAINS, 4,
-        )
-        statute.title = f"Governing law: {area}"
-        self.findings.append(statute)
+        def _statute():
+            t0 = time.time()
+            self._log("StatuteAgent", f"searching primary law for {area} in {jurisdiction}")
+            result = self._search(
+                "StatuteAgent",
+                f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
+                "Identify the statutes, regulations, municipal codes, and official "
+                "procedures that govern a matter like this, including any filing or "
+                "notice deadlines. Cite each one. Do NOT compute deadline dates — "
+                "only state the rules.",
+                STATUTE_DOMAINS, 4,
+            )
+            result.title = f"Governing law: {area}"
+            self._log("StatuteAgent", f"done in {time.time() - t0:.1f}s")
+            return result
 
-        self._log("ContextAgent", "searching guides, news, and community context")
-        context = self._search(
-            "ContextAgent",
-            f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
-            "Find plain language guides from legal aid or bar associations, "
-            "recent news, and reputable explainer videos about this kind of "
-            "matter. Label which are which.",
-            None, 2,
-        )
-        context.title = "Plain language context"
-        self.findings.append(context)
+        def _context():
+            t0 = time.time()
+            self._log("ContextAgent", "searching guides, news, and community context")
+            result = self._search(
+                "ContextAgent",
+                f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
+                "Find plain language guides from legal aid or bar associations, "
+                "recent news, and reputable explainer videos about this kind of "
+                "matter. Label which are which.",
+                None, 2,
+            )
+            result.title = "Plain language context"
+            self._log("ContextAgent", f"done in {time.time() - t0:.1f}s")
+            return result
+
+        # Run agents in parallel
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_statute = pool.submit(_statute)
+            fut_context = pool.submit(_context)
+            self.findings.append(fut_statute.result())
+            self.findings.append(fut_context.result())
 
         self._validate()
+        self._log("Research", f"total wall time: {time.time() - t_start:.1f}s")
         return self.findings
 
     # -------------------------------------------------------- ValidatorAgent
