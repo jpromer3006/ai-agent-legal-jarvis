@@ -46,8 +46,8 @@ III. APPLICATION
 Apply the rules to the specific facts of this case. Analyze strengths and weaknesses.
 Reference specific facts from the intake. Discuss analogous cases if relevant.
 
-IV. CONCLUSION
-State the likely outcome and recommended course of action for the attorney.
+IV. POSSIBLE OUTCOMES AND OPEN QUESTIONS
+State possible outcomes, open questions, and areas needing further research.
 
 V. SOURCES
 List every source cited, numbered as footnotes [1], [2], etc. with full URLs.
@@ -207,7 +207,7 @@ def memo_to_pdf(memo_text: str, case_title: str = "Legal Memorandum") -> bytes:
     story = []
 
     # Confidential header
-    story.append(Paragraph("PRIVILEGED AND CONFIDENTIAL — ATTORNEY WORK PRODUCT", styles["Confidential"]))
+    story.append(Paragraph("EDUCATIONAL DEMO — NOT LEGAL ADVICE", styles["Confidential"]))
     story.append(Spacer(1, 12))
     story.append(HRFlowable(width="100%", thickness=1.5, color=HexColor("#1a1a2e")))
     story.append(Spacer(1, 8))

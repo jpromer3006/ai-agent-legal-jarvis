@@ -589,7 +589,7 @@ def _lawyer_mode_ui():
 
     st.markdown("""
     <div style="text-align:center; margin-top:20px; font-size:10px; color:#8a7a5a; letter-spacing:.15em;">
-      PRIVILEGED AND CONFIDENTIAL — ATTORNEY WORK PRODUCT
+      EDUCATIONAL DEMO — NOT LEGAL ADVICE
     </div>""", unsafe_allow_html=True)
 
 

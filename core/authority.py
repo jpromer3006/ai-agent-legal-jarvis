@@ -3,6 +3,10 @@
 Every source Jarvis touches gets a tier. Government and court sources are
 primary law and always win. Commentary and social sources can add context
 but can never be the sole support for a claim.
+
+Special URL path rules:
+  - nysenate.gov/legislation/bills/ → LEGISLATIVE HISTORY (not primary law)
+  - mtaig.ny.gov → GOVERNMENT, NON-LEGAL (Inspector General, not law)
 """
 from __future__ import annotations
 
@@ -10,7 +14,8 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 # Tier 1: primary law. Federal, state, municipal government and courts.
-TIER1_SUFFIXES = (".gov", ".mil", ".us")
+# P1.2: .us removed — too broad (personal/commercial sites).
+TIER1_SUFFIXES = (".gov", ".mil")
 TIER1_DOMAINS = {
     "nycourts.gov", "nyc.gov", "ny.gov", "nysenate.gov", "uscourts.gov",
     "supremecourt.gov", "congress.gov", "govinfo.gov", "ecfr.gov",
@@ -18,7 +23,7 @@ TIER1_DOMAINS = {
     "wcb.ny.gov", "codelibrary.amlegal.com", "legislation.nysenate.gov",
 }
 
-# Tier 2: trusted secondary legal sources that reproduce or analyze primary law.
+# Tier 2: trusted secondary legal sources.
 TIER2_DOMAINS = {
     "law.cornell.edu", "justia.com", "law.justia.com", "courtlistener.com",
     "casetext.com", "findlaw.com", "nolo.com", "americanbar.org",
@@ -27,18 +32,21 @@ TIER2_DOMAINS = {
     "legalaidnyc.org", "ilrc.org", "aila.org",
 }
 
-# Tier 3: reputable journalism. Good for current events, not for law itself.
+# Tier 3: reputable journalism.
 TIER3_DOMAINS = {
     "reuters.com", "apnews.com", "nytimes.com", "wsj.com", "bloomberg.com",
     "bloomberglaw.com", "npr.org", "pbs.org", "propublica.org", "politico.com",
     "law360.com", "abajournal.com",
 }
 
-# Tier 4: community and video. Context and lived experience only.
+# Tier 4: community and video.
 TIER4_DOMAINS = {
     "youtube.com", "youtu.be", "reddit.com", "x.com", "twitter.com",
     "tiktok.com", "quora.com", "facebook.com", "instagram.com", "medium.com",
 }
+
+# Government domains that are NOT primary law
+GOV_NON_LEGAL_DOMAINS = {"mtaig.ny.gov"}
 
 TIER_LABELS = {
     1: "PRIMARY LAW",
@@ -46,9 +54,15 @@ TIER_LABELS = {
     3: "NEWS",
     4: "COMMUNITY",
     5: "UNVERIFIED",
+    6: "LEGISLATIVE HISTORY",
+    7: "GOVERNMENT, NON-LEGAL",
 }
 
-TIER_WEIGHT = {1: 1.0, 2: 0.75, 3: 0.45, 4: 0.15, 5: 0.05}
+TIER_WEIGHT = {
+    1: 1.0, 2: 0.75, 3: 0.45, 4: 0.15, 5: 0.05,
+    6: 0.3,  # legislative history (bills, not enacted law)
+    7: 0.2,  # government non-legal (inspector general, etc.)
+}
 
 
 @dataclass
@@ -62,15 +76,15 @@ class Source:
 
     def __post_init__(self) -> None:
         self.domain = domain_of(self.url)
-        self.tier = classify_domain(self.domain)
+        self.tier = classify_url(self.url, self.domain)
 
     @property
     def label(self) -> str:
-        return TIER_LABELS[self.tier]
+        return TIER_LABELS.get(self.tier, "UNVERIFIED")
 
     @property
     def weight(self) -> float:
-        return TIER_WEIGHT[self.tier]
+        return TIER_WEIGHT.get(self.tier, 0.05)
 
     @property
     def can_support_claim_alone(self) -> bool:
@@ -86,7 +100,19 @@ def _matches(domain: str, pool: set[str]) -> bool:
     return any(domain == d or domain.endswith("." + d) for d in pool)
 
 
-def classify_domain(domain: str) -> int:
+def classify_url(url: str, domain: str | None = None) -> int:
+    """Classify a URL into a tier, considering both domain and path."""
+    if domain is None:
+        domain = domain_of(url)
+    path = urlparse(url).path.lower()
+
+    # Special path rules (before domain rules)
+    if "nysenate.gov" in domain and "/legislation/bills/" in path:
+        return 6  # LEGISLATIVE HISTORY
+    if _matches(domain, GOV_NON_LEGAL_DOMAINS):
+        return 7  # GOVERNMENT, NON-LEGAL
+
+    # Standard domain rules
     if _matches(domain, TIER1_DOMAINS) or domain.endswith(TIER1_SUFFIXES):
         return 1
     if _matches(domain, TIER2_DOMAINS):
@@ -96,6 +122,11 @@ def classify_domain(domain: str) -> int:
     if _matches(domain, TIER4_DOMAINS):
         return 4
     return 5
+
+
+# Backward compat alias
+def classify_domain(domain: str) -> int:
+    return classify_url("", domain)
 
 
 def rank(sources: list[Source]) -> list[Source]:

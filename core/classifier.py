@@ -63,7 +63,8 @@ LAW_AREAS: dict[str, dict] = {
     },
     "Estates / Probate": {
         "icon": "EST",
-        "keywords": ["will", "estate", "probate", "inherit", "executor", "passed away"],
+        "keywords": ["last will", "will and testament", "estate", "probate",
+                     "inherit", "executor", "passed away"],
     },
     "Traffic / Vehicle": {
         "icon": "TRF",
@@ -84,10 +85,22 @@ class AreaScore:
 
 
 def baseline_classify(text: str, top_k: int = 3) -> list[AreaScore]:
-    t = " " + re.sub(r"\s+", " ", text.lower()) + " "
+    """Classify text using word-boundary keyword matching.
+
+    P1.3: Uses \\b word boundaries instead of substring matching to avoid
+    false positives like "bus" in "business" or "train" in "restraining".
+    Multi-word phrases use their natural boundaries.
+    """
+    t = re.sub(r"\s+", " ", text.lower())
     scored = []
     for area, spec in LAW_AREAS.items():
-        hits = [k for k in spec["keywords"] if k in t]
+        hits = []
+        for kw in spec["keywords"]:
+            # Multi-word phrases: match as-is with word boundaries
+            # Single words: strict word boundary
+            pattern = r"\b" + re.escape(kw) + r"\b"
+            if re.search(pattern, t):
+                hits.append(kw)
         if hits:
             scored.append(AreaScore(area, float(len(hits)), hits))
     total = sum(s.score for s in scored) or 1.0
