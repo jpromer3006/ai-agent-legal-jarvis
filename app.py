@@ -29,6 +29,7 @@ from core import voice
 from core.lawyer import claude_legal_chat, generate_irac_memo, memo_to_pdf
 from core.procedure import select_procedure, locate_stages
 from ui.procedure_map import render_procedure_map
+from ui.agent_view import render_agent_cards, render_validator_summary
 
 try:
     import anthropic as _anthropic_mod
@@ -939,6 +940,9 @@ if orch.findings:
 <div class="panel"><div class="ptitle">{esc(f.title).upper()} <span>{esc(f.agent)}</span></div>
 <span class="chip {cls}">{f.status.upper()}</span>
 <div class="finding" style="margin-top:8px">{esc(f.body)}</div></div>""", unsafe_allow_html=True)
+
+    # Validator summary line
+    st.markdown(render_validator_summary(orch.findings), unsafe_allow_html=True)
 
     # Educational disclaimer under findings
     st.markdown('<div class="disclaimer">JARVIS Legal OS is an educational prototype. '
