@@ -70,14 +70,13 @@ def load_first_steps() -> list[dict]:
 
 
 def find_first_step(domain: str, respondent: str) -> dict | None:
-    """Find the matching first step entry for a (domain, respondent) pair."""
+    """Find the matching first step entry for an exact (domain, respondent) pair.
+
+    No domain-only fallback — returns None when the respondent doesn't match.
+    This prevents showing the wrong procedure (e.g., NYCT card for LIRR).
+    """
     steps = load_first_steps()
-    # Exact match first
     for s in steps:
         if s["domain"] == domain and s["respondent"] == respondent:
-            return s
-    # Domain-only fallback
-    for s in steps:
-        if s["domain"] == domain:
             return s
     return None

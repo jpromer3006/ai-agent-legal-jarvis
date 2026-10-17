@@ -22,7 +22,8 @@ except ImportError:
 from core.authority import TIER_LABELS
 from core.classifier import LAW_AREAS
 from core.deadlines import compute_deadline, find_first_step
-from core.intake import SLOT_LABELS, CaseFile
+from core.intake import (SLOT_LABELS, CaseFile, is_advice_seeking,
+                         ADVICE_REFUSAL, list_known_entities)
 from core.orchestrator import Orchestrator, MODEL, GUARDRAIL
 from core import voice
 from core.lawyer import claude_legal_chat, generate_irac_memo, memo_to_pdf
@@ -35,7 +36,7 @@ except ImportError:
 st.set_page_config(page_title="JARVIS Legal OS", page_icon="⚖️", layout="wide",
                    initial_sidebar_state="collapsed")
 
-USER = os.getenv("JARVIS_USER", "JP Romero")
+USER = os.getenv("JARVIS_USER", "GUEST")
 
 # ------------------------------------------------------------------ state
 if "case" not in st.session_state:
@@ -618,6 +619,15 @@ if answer:
         case.transcript.append({"role": "user", "text": answer})
         st.session_state.show_first_step_chat = True
         st.rerun()
+    elif is_advice_seeking(answer):
+        # P1.4: Intent gate — refuse advice, re-ask pending question
+        case.transcript.append({"role": "user", "text": answer})
+        _pending_q = ""
+        if case.pending_slot:
+            nxt = case.next_question()
+            _pending_q = f"\n\n{nxt[1]}" if nxt else ""
+        case.transcript.append({"role": "jarvis", "text": ADVICE_REFUSAL + _pending_q})
+        st.rerun()
     else:
         with st.spinner("JARVIS processing"):
             orch.extract_facts(case, answer)
@@ -625,6 +635,13 @@ if answer:
             nxt = case.next_question()
             if nxt:
                 case.pending_slot, q = nxt
+                # If date was vague, ask for exact date
+                if case.when_raw and not case.when_iso:
+                    q = (f"I need an exact date to compute deadlines. "
+                         f"You said \"{case.when_raw}\" — can you give me "
+                         f"the specific date (month, day, year)?")
+                    case.pending_slot = "when"
+                    case.facts.pop("when", None)
                 case.transcript.append({"role": "jarvis", "text": q})
             else:
                 case.pending_slot = None
@@ -728,7 +745,7 @@ with left:
                 unsafe_allow_html=True)
 
     # Entity confirmation widget
-    if case.resolved_entity and not case.entity_confirmed:
+    if case.resolved_entity and not case.entity_confirmed and not case.entity_rejected:
         st.markdown(f"""
 <div class="entity-confirm">
   <div class="ptitle">CONFIRM RESPONDENT</div>
@@ -745,8 +762,31 @@ with left:
         with ec2:
             if st.button("NOT CORRECT"):
                 case.resolved_entity = None
-                orch._log("IntakeAgent", "entity rejected by user")
+                case.entity_rejected = True
+                orch._log("IntakeAgent", "entity rejected by user — showing picker")
                 st.rerun()
+
+    # P0.3: After rejection, show a picker
+    if case.entity_rejected and not case.entity_confirmed:
+        st.markdown("""
+<div class="entity-confirm">
+  <div class="ptitle">SELECT RESPONDENT</div>
+  <div style="font-size:13px; color:#e9fbff;">Which public entity is involved?</div>
+</div>""", unsafe_allow_html=True)
+        _entities = list_known_entities() + ["Other / not sure"]
+        _pick = st.selectbox("Select respondent", _entities, key="entity_picker",
+                             label_visibility="collapsed")
+        if st.button("CONFIRM SELECTION"):
+            if _pick == "Other / not sure":
+                case.resolved_entity = None
+                case.entity_confirmed = False
+                orch._log("IntakeAgent", "entity: user unsure")
+            else:
+                case.resolved_entity = _pick
+                case.entity_confirmed = True
+                case.facts["public_entity"] = _pick
+                orch._log("IntakeAgent", f"entity selected by user: {_pick}")
+            st.rerun()
 
     if case.timeline:
         tl = "".join(f'<div><b>{esc(e.get("date", ""))}</b> {esc(e.get("event", ""))}</div>' for e in case.timeline)
@@ -780,7 +820,7 @@ with center:
         # --- JARVIS VOICE button (glowing, centered) + standard buttons ---
         b1, b2, b3 = st.columns([1, 1.2, 1])
         with b1:
-            if st.button("RUN RESEARCH", disabled=not case.facts):
+            if st.button("RUN RESEARCH", disabled=not all(k in case.facts for k in ("narrative", "where")) or not case.when_iso):
                 st.session_state.run_research = True
                 st.rerun()
         with b2:
@@ -832,7 +872,7 @@ with center:
         # Buttons row
         v1, v2, v3 = st.columns(3)
         with v1:
-            if st.button("RUN RESEARCH", disabled=not case.facts, key="vrun"):
+            if st.button("RUN RESEARCH", disabled=not all(k in case.facts for k in ("narrative", "where")) or not case.when_iso, key="vrun"):
                 st.session_state.run_research = True
                 st.rerun()
         with v2:
@@ -886,73 +926,8 @@ with right:
     st.markdown(f'<div class="panel"><div class="ptitle">AGENT ACTIVITY</div><div class="log">{log}</div></div>',
                 unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ FIRST STEP panel (replaces findings)
-_area = case.primary_area or ""
-_resp = case.resolved_entity or ""
-_first_step = find_first_step(_area, _resp) if _area else None
-
-if _first_step and orch.findings:
-    st.write("")
-    st.markdown('<div class="panel"><div class="ptitle">NEXT STEP</div>', unsafe_allow_html=True)
-
-    # Respondent
-    st.markdown(f'<div style="font-size:13px; color:var(--dim); letter-spacing:.1em;">RESPONDENT</div>'
-                f'<div style="font-size:16px; color:#e9fbff; margin-bottom:10px;">{esc(_first_step["respondent"])}</div>',
-                unsafe_allow_html=True)
-
-    # Deadline
-    if case.when_iso:
-        dl = compute_deadline(case.when_iso, _first_step["deadline_rule"])
-        exp_cls = " expired" if dl.is_expired else ""
-        days_text = "EXPIRED" if dl.is_expired else f"{dl.days_remaining} DAYS REMAINING"
-        st.markdown(f'<div class="deadline-big{exp_cls}">{dl.deadline_date.strftime("%B %d, %Y")}</div>'
-                    f'<div class="deadline-days" style="color:{"var(--bad)" if dl.is_expired else "var(--warn)"};">'
-                    f'{days_text} ({dl.label})</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="deadline-big">DATE NEEDED</div>'
-                    '<div class="deadline-days">Provide the incident date to compute your deadline.</div>',
-                    unsafe_allow_html=True)
-
-    # Verification badge
-    if _first_step.get("needs_verification"):
-        st.markdown('<div class="unverified">UNVERIFIED, UNDER REVIEW</div>', unsafe_allow_html=True)
-
-    # Title
-    st.markdown(f'<div style="font-family:Orbitron; font-size:14px; color:var(--cyan); letter-spacing:.15em; '
-                f'margin:12px 0 8px;">{esc(_first_step["first_step_title"]).upper()}</div>', unsafe_allow_html=True)
-
-    # Steps
-    for i, step in enumerate(_first_step["plain_language_steps"], 1):
-        st.markdown(f'<div class="step-item"><span class="step-num">{i}.</span>{esc(step)}</div>',
-                    unsafe_allow_html=True)
-
-    # Where to file
-    if _first_step.get("where_to_file"):
-        st.markdown(f'<div style="margin-top:10px; font-size:12px; color:var(--dim);">WHERE TO FILE</div>'
-                    f'<div style="font-size:13px; color:#e9fbff;">{esc(_first_step["where_to_file"])}</div>',
-                    unsafe_allow_html=True)
-
-    # Citations
-    if _first_step.get("citations"):
-        cites = ""
-        for c in _first_step["citations"]:
-            t = c.get("tier", 5)
-            cites += (f'<div class="src"><span class="tier t{t}">T{t}</span>'
-                      f'<a href="{esc(c["url"])}" target="_blank">{esc(c["label"])}</a></div>')
-        st.markdown(f'<div style="margin-top:10px;">{cites}</div>', unsafe_allow_html=True)
-
-    # Video slot (hidden when none)
-    if _first_step.get("video", {}).get("status") not in (None, "none"):
-        vid = _first_step["video"]
-        if vid.get("url"):
-            st.markdown(f'<div style="margin-top:10px;"><a href="{esc(vid["url"])}" target="_blank" '
-                        f'style="color:var(--cyan);">Watch explainer video</a></div>',
-                        unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-elif orch.findings:
-    # Fallback: show raw findings if no first_step match
+# ------------------------------------------------------------------ FINDINGS (always shown)
+if orch.findings:
     st.write("")
     cols = st.columns(len(orch.findings))
     for col, f in zip(cols, orch.findings):
@@ -962,6 +937,82 @@ elif orch.findings:
 <div class="panel"><div class="ptitle">{esc(f.title).upper()} <span>{esc(f.agent)}</span></div>
 <span class="chip {cls}">{f.status.upper()}</span>
 <div class="finding" style="margin-top:8px">{esc(f.body)}</div></div>""", unsafe_allow_html=True)
+
+    # Educational disclaimer under findings
+    st.markdown('<div class="disclaimer">JARVIS Legal OS is an educational prototype. '
+                'It shares general legal information only. Confirm all deadlines with a '
+                'licensed attorney, legal aid, or a court help center.</div>',
+                unsafe_allow_html=True)
+
+# ------------------------------------------------------------------ NEXT STEP (exact match only)
+_area = case.primary_area or ""
+_resp = case.resolved_entity or ""
+# P0.4: Only show next step on exact (domain, respondent) match with confirmed entity
+_first_step = None
+if _area and _resp and case.entity_confirmed:
+    from core.deadlines import load_first_steps
+    _steps = load_first_steps()
+    _first_step = next((s for s in _steps
+                        if s["domain"] == _area and s["respondent"] == _resp), None)
+
+if _first_step and orch.findings:
+    st.write("")
+    st.markdown('<div class="panel"><div class="ptitle">NEXT STEP</div>', unsafe_allow_html=True)
+
+    st.markdown(f'<div style="font-size:13px; color:var(--dim); letter-spacing:.1em;">RESPONDENT</div>'
+                f'<div style="font-size:16px; color:#e9fbff; margin-bottom:10px;">{esc(_first_step["respondent"])}</div>',
+                unsafe_allow_html=True)
+
+    if case.when_iso:
+        dl = compute_deadline(case.when_iso, _first_step["deadline_rule"])
+        exp_cls = " expired" if dl.is_expired else ""
+        days_text = "EXPIRED" if dl.is_expired else f"{dl.days_remaining} DAYS REMAINING"
+        st.markdown(f'<div class="deadline-big{exp_cls}">{dl.deadline_date.strftime("%B %d, %Y")}</div>'
+                    f'<div class="deadline-days" style="color:{"var(--bad)" if dl.is_expired else "var(--warn)"};">'
+                    f'{days_text} ({dl.label})</div>', unsafe_allow_html=True)
+        if dl.is_expired:
+            st.markdown('<div class="disclaimer" style="color:#ff4d6d;">Other paths may exist. '
+                        'Talk to a lawyer or Court Help Center now.</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="deadline-big">EXACT DATE NEEDED</div>'
+                    '<div class="deadline-days">Provide the exact incident date to compute your deadline.</div>',
+                    unsafe_allow_html=True)
+
+    if _first_step.get("needs_verification"):
+        st.markdown('<div class="unverified">UNVERIFIED, UNDER REVIEW</div>', unsafe_allow_html=True)
+
+    st.markdown(f'<div style="font-family:Orbitron; font-size:14px; color:var(--cyan); letter-spacing:.15em; '
+                f'margin:12px 0 8px;">{esc(_first_step["first_step_title"]).upper()}</div>', unsafe_allow_html=True)
+
+    for i, step in enumerate(_first_step["plain_language_steps"], 1):
+        st.markdown(f'<div class="step-item"><span class="step-num">{i}.</span>{esc(step)}</div>',
+                    unsafe_allow_html=True)
+
+    if _first_step.get("where_to_file"):
+        st.markdown(f'<div style="margin-top:10px; font-size:12px; color:var(--dim);">WHERE TO FILE</div>'
+                    f'<div style="font-size:13px; color:#e9fbff;">{esc(_first_step["where_to_file"])}</div>',
+                    unsafe_allow_html=True)
+
+    if _first_step.get("citations"):
+        cites = ""
+        for c in _first_step["citations"]:
+            t = c.get("tier", 5)
+            cites += (f'<div class="src"><span class="tier t{t}">T{t}</span>'
+                      f'<a href="{esc(c["url"])}" target="_blank">{esc(c["label"])}</a></div>')
+        st.markdown(f'<div style="margin-top:10px;">{cites}</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+elif orch.findings and _area:
+    # No exact match — show help resources instead of wrong card
+    st.markdown("""
+    <div class="panel"><div class="ptitle">NEXT STEP</div>
+    <div style="font-size:14px; color:#e9fbff;">
+      No verified procedure on file for this respondent. For guidance:<br><br>
+      <a href="https://www.nycourts.gov/courthelp/" target="_blank" style="color:var(--cyan);">NYC CourtHelp</a> ·
+      <a href="https://www.lawhelpny.org/" target="_blank" style="color:var(--cyan);">LawHelpNY</a> ·
+      <a href="https://www.nycbar.org/get-legal-help/" target="_blank" style="color:var(--cyan);">NYC Bar Legal Referral</a>
+    </div></div>""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ voice follow-up chat (after research)
 if st.session_state.voice_mode and orch.findings and st.session_state.voice_messages:
