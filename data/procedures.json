@@ -1,0 +1,508 @@
+{
+  "_meta": {
+    "description": "Legal procedure maps for JARVIS Legal OS. Educational only.",
+    "needs_verification": true,
+    "reviewed_by": null,
+    "note": "Stage text uses 'typically' or 'commonly', never 'you will' or 'you should'."
+  },
+  "procedures": [
+    {
+      "id": "nyc-public-entity-tort",
+      "title": "Claim Against a NYC Public Entity",
+      "applies_when": {
+        "area": "Torts / Personal Injury",
+        "respondent_type": ["City of New York", "New York City Transit Authority",
+                            "New York City Housing Authority"]
+      },
+      "needs_verification": true,
+      "reviewed_by": null,
+      "stages": [
+        {
+          "id": "incident",
+          "title": "Incident",
+          "plain": "The event that caused the injury has occurred.",
+          "anticipate": ["Preserve evidence: photos, witness names, medical records",
+                         "Request surveillance footage promptly — retention periods are short"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": ["Photos of scene and injuries", "Incident or police report",
+                        "Witness contact information"],
+          "who_you_deal_with": [],
+          "done_signals": ["narrative"],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "notice_of_claim",
+          "title": "Notice of Claim",
+          "plain": "A formal notice is typically required before suing a public entity in New York.",
+          "anticipate": ["The notice commonly must be filed within 90 days of the incident [VERIFY]",
+                         "It is typically filed with the NYC Comptroller or served on the specific agency [VERIFY]",
+                         "The form asks for the date, location, description, and claimed amount"],
+          "typical_duration": "Must typically be filed within 90 days [VERIFY]",
+          "deadline_ref": "notice_of_claim_90d",
+          "documents": ["Notice of Claim form", "Proof of service or filing receipt"],
+          "who_you_deal_with": ["NYC Comptroller's Office or agency counsel [VERIFY]"],
+          "done_signals": ["actions_taken:notice of claim", "actions_taken:filed"],
+          "sources": [
+            {"label": "NY GML §50-e", "url": "https://www.nysenate.gov/legislation/laws/GMU/50-E", "tier": 1}
+          ],
+          "branches": [
+            {"id": "late_notice", "title": "Late Notice Application",
+             "plain": "If the 90-day window has passed, courts sometimes grant permission to file late under certain circumstances [VERIFY].",
+             "trigger": "deadline_expired"}
+          ]
+        },
+        {
+          "id": "fifty_h_hearing",
+          "title": "50-h Examination",
+          "plain": "After filing the notice, the public entity's attorneys typically schedule a hearing where they ask questions under oath.",
+          "anticipate": ["This is commonly scheduled within 90 days after the notice [VERIFY]",
+                         "A court reporter typically records the testimony",
+                         "An attorney is not required but is commonly recommended"],
+          "typical_duration": "Commonly scheduled weeks to months after the notice",
+          "deadline_ref": null,
+          "documents": ["Medical records", "Photos", "Any documents related to the incident"],
+          "who_you_deal_with": ["Agency or city attorneys", "Court reporter"],
+          "done_signals": [],
+          "sources": [
+            {"label": "NY GML §50-h", "url": "https://www.nysenate.gov/legislation/laws/GMU/50-H", "tier": 1}
+          ],
+          "branches": []
+        },
+        {
+          "id": "waiting_period",
+          "title": "Waiting Period",
+          "plain": "There is typically a waiting period before a lawsuit can be filed against the public entity.",
+          "anticipate": ["The waiting period is commonly 30 days after the 50-h hearing [VERIFY]",
+                         "During this time the claim may be adjusted or settled"],
+          "typical_duration": "Commonly 30 days [VERIFY]",
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": [],
+          "done_signals": [],
+          "sources": [],
+          "branches": [
+            {"id": "settlement_any", "title": "Settlement",
+             "plain": "A case can commonly be settled at any stage through negotiation.",
+             "trigger": "any"}
+          ]
+        },
+        {
+          "id": "summons_complaint",
+          "title": "Summons & Complaint",
+          "plain": "A lawsuit is typically commenced by filing a summons and complaint with the court and purchasing an index number.",
+          "anticipate": ["Filing fees and an index number purchase are typically required",
+                         "The statute of limitations for claims against public entities is commonly 1 year and 90 days from the incident [VERIFY]"],
+          "typical_duration": "Must typically be filed within the statute of limitations",
+          "deadline_ref": null,
+          "documents": ["Summons", "Verified Complaint", "Index number"],
+          "who_you_deal_with": ["Court clerk", "Process server"],
+          "done_signals": [],
+          "sources": [
+            {"label": "NY GML §50-i", "url": "https://www.nysenate.gov/legislation/laws/GMU/50-I", "tier": 1}
+          ],
+          "branches": []
+        },
+        {
+          "id": "answer",
+          "title": "Answer",
+          "plain": "The defendant typically responds to the complaint with an answer within a set time.",
+          "anticipate": ["The answer commonly raises defenses and may include counterclaims"],
+          "typical_duration": "Commonly 20–30 days after service [VERIFY]",
+          "deadline_ref": null,
+          "documents": ["Answer", "Affirmative defenses"],
+          "who_you_deal_with": ["Defendant's attorney"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "discovery",
+          "title": "Discovery & Conferences",
+          "plain": "Both sides typically exchange evidence and attend court conferences to manage the case.",
+          "anticipate": ["Depositions, document requests, and interrogatories are common",
+                         "A preliminary conference is typically scheduled by the court",
+                         "This phase commonly takes several months to over a year"],
+          "typical_duration": "Commonly 6–18 months",
+          "deadline_ref": null,
+          "documents": ["Discovery demands", "Deposition transcripts", "Expert reports"],
+          "who_you_deal_with": ["Opposing counsel", "Judge or court attorney"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "note_of_issue",
+          "title": "Note of Issue",
+          "plain": "When discovery is complete, a note of issue is typically filed to place the case on the trial calendar.",
+          "anticipate": ["Filing the note of issue commonly signals readiness for trial"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": ["Note of Issue", "Certificate of Readiness"],
+          "who_you_deal_with": ["Court clerk"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "motions",
+          "title": "Motions",
+          "plain": "Either side may file motions asking the court to decide issues before trial.",
+          "anticipate": ["Summary judgment motions are common — one side argues no trial is needed",
+                         "Motions in limine may limit evidence at trial"],
+          "typical_duration": "Commonly weeks to months for decisions",
+          "deadline_ref": null,
+          "documents": ["Motion papers", "Opposition papers"],
+          "who_you_deal_with": ["Judge", "Opposing counsel"],
+          "done_signals": [],
+          "sources": [],
+          "branches": [
+            {"id": "dismissal", "title": "Dismissal",
+             "plain": "The court may dismiss the case if it finds the claim lacks merit or a required step was missed.",
+             "trigger": "motion_granted"}
+          ]
+        },
+        {
+          "id": "settlement_or_trial",
+          "title": "Settlement Conference or Trial",
+          "plain": "Cases commonly settle before trial through negotiation or mediation. If not, the case goes to trial.",
+          "anticipate": ["Settlement conferences are typically mandatory in many courts",
+                         "A trial may be before a judge or jury depending on the case",
+                         "Trial commonly lasts days to weeks"],
+          "typical_duration": "Settlement possible at any point; trial commonly scheduled months after note of issue",
+          "deadline_ref": null,
+          "documents": ["Trial exhibits", "Witness lists"],
+          "who_you_deal_with": ["Judge", "Jury (if applicable)", "Mediator"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "judgment",
+          "title": "Judgment & Possible Appeal",
+          "plain": "After trial or settlement, a judgment is typically entered. Either side may appeal.",
+          "anticipate": ["Appeals commonly must be filed within 30 days of the judgment [VERIFY]",
+                         "Collection of a judgment against a public entity follows specific rules"],
+          "typical_duration": "Appeals commonly take months to years",
+          "deadline_ref": null,
+          "documents": ["Judgment", "Notice of appeal (if applicable)"],
+          "who_you_deal_with": ["Court", "Appellate court (if appealing)"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        }
+      ]
+    },
+    {
+      "id": "private-party-injury",
+      "title": "Injury Claim Against a Private Party",
+      "applies_when": {
+        "area": "Torts / Personal Injury",
+        "respondent_type": ["_private"]
+      },
+      "needs_verification": true,
+      "reviewed_by": null,
+      "stages": [
+        {
+          "id": "incident",
+          "title": "Incident",
+          "plain": "The event that caused the injury has occurred.",
+          "anticipate": ["Preserve evidence and seek medical attention promptly"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": ["Photos", "Police or incident report", "Medical records"],
+          "who_you_deal_with": [],
+          "done_signals": ["narrative"],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "demand_insurance",
+          "title": "Demand or Insurance Claim",
+          "plain": "A demand letter or insurance claim is commonly the first step toward resolution.",
+          "anticipate": ["The at-fault party's insurance company typically handles the claim",
+                         "An adjuster may contact you for a recorded statement"],
+          "typical_duration": "Commonly weeks to months for response",
+          "deadline_ref": null,
+          "documents": ["Demand letter", "Medical bills", "Proof of lost wages"],
+          "who_you_deal_with": ["Insurance adjuster", "At-fault party"],
+          "done_signals": ["actions_taken:demand", "actions_taken:insurance"],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "summons_complaint",
+          "title": "Summons & Complaint",
+          "plain": "If the claim cannot be resolved, a lawsuit is typically filed in court.",
+          "anticipate": ["The statute of limitations for personal injury in NY is commonly 3 years [VERIFY]"],
+          "typical_duration": "Must be filed within the statute of limitations",
+          "deadline_ref": null,
+          "documents": ["Summons", "Complaint", "Index number"],
+          "who_you_deal_with": ["Court clerk", "Process server"],
+          "done_signals": [],
+          "sources": [
+            {"label": "NY CPLR §214", "url": "https://www.nysenate.gov/legislation/laws/CVP/214", "tier": 1}
+          ],
+          "branches": []
+        },
+        {
+          "id": "answer",
+          "title": "Answer",
+          "plain": "The defendant typically responds with an answer.",
+          "anticipate": [],
+          "typical_duration": "Commonly 20–30 days",
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": ["Defendant's attorney"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "discovery",
+          "title": "Discovery",
+          "plain": "Both sides typically exchange evidence through depositions, documents, and interrogatories.",
+          "anticipate": ["This phase commonly takes several months"],
+          "typical_duration": "Commonly 6–12 months",
+          "deadline_ref": null,
+          "documents": ["Discovery demands", "Depositions"],
+          "who_you_deal_with": ["Opposing counsel", "Judge"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "note_of_issue",
+          "title": "Note of Issue",
+          "plain": "Filed when discovery is complete to place the case on the trial calendar.",
+          "anticipate": [],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": ["Note of Issue"],
+          "who_you_deal_with": ["Court clerk"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "motions",
+          "title": "Motions",
+          "plain": "Either side may file motions before trial.",
+          "anticipate": ["Summary judgment motions are common"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": ["Judge"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "settlement_or_trial",
+          "title": "Settlement or Trial",
+          "plain": "Most cases commonly settle. If not, the case proceeds to trial.",
+          "anticipate": [],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": ["Judge", "Jury", "Mediator"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "judgment",
+          "title": "Judgment",
+          "plain": "A judgment is entered after trial or settlement.",
+          "anticipate": [],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": ["Judgment"],
+          "who_you_deal_with": ["Court"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        }
+      ]
+    },
+    {
+      "id": "nyc-small-claims",
+      "title": "NYC Small Claims Court",
+      "applies_when": {
+        "area": "_small_claims",
+        "respondent_type": ["_any"]
+      },
+      "needs_verification": true,
+      "reviewed_by": null,
+      "stages": [
+        {
+          "id": "incident",
+          "title": "Incident",
+          "plain": "The event giving rise to the claim has occurred.",
+          "anticipate": ["Gather evidence and calculate damages"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": ["Evidence of damages", "Receipts", "Photos"],
+          "who_you_deal_with": [],
+          "done_signals": ["narrative"],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "filing",
+          "title": "Filing with the Clerk",
+          "plain": "A small claims case is typically started by filing with the court clerk and paying a small fee.",
+          "anticipate": ["The claim limit in NYC Small Claims is commonly $10,000 [VERIFY]",
+                         "Filing can typically be done in person at the courthouse"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": ["Claim form", "Filing fee"],
+          "who_you_deal_with": ["Court clerk"],
+          "done_signals": ["actions_taken:filed"],
+          "sources": [
+            {"label": "NYC Small Claims Court", "url": "https://www.nycourts.gov/courts/nyc/smallclaims/", "tier": 1}
+          ],
+          "branches": []
+        },
+        {
+          "id": "service",
+          "title": "Service by the Court",
+          "plain": "The court typically serves the defendant by mail with notice of the hearing date.",
+          "anticipate": ["The hearing is commonly scheduled several weeks after filing"],
+          "typical_duration": "Commonly 2–8 weeks",
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": ["Court"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "hearing",
+          "title": "Hearing",
+          "plain": "Both sides typically present their case to an arbitrator or judge in an informal setting.",
+          "anticipate": ["Bring all evidence, documents, and witnesses",
+                         "No formal rules of evidence — the arbitrator commonly asks questions directly"],
+          "typical_duration": "Commonly 15–30 minutes",
+          "deadline_ref": null,
+          "documents": ["All evidence", "Witness list"],
+          "who_you_deal_with": ["Arbitrator or judge", "Defendant"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "decision",
+          "title": "Decision",
+          "plain": "The arbitrator or judge typically issues a decision, sometimes the same day.",
+          "anticipate": ["Decisions are commonly mailed within a few days"],
+          "typical_duration": "Commonly same day to a few weeks",
+          "deadline_ref": null,
+          "documents": ["Decision/Judgment"],
+          "who_you_deal_with": ["Court"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "collection",
+          "title": "Collecting a Judgment",
+          "plain": "If you win, collecting the judgment is typically your responsibility.",
+          "anticipate": ["The court does not commonly collect for you",
+                         "Enforcement options may include wage garnishment or bank restraint [VERIFY]"],
+          "typical_duration": "Varies widely",
+          "deadline_ref": null,
+          "documents": ["Judgment", "Enforcement papers"],
+          "who_you_deal_with": ["Marshal or sheriff", "Defendant"],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        }
+      ]
+    },
+    {
+      "id": "generic-fallback",
+      "title": "General Outline",
+      "applies_when": {
+        "area": "_any",
+        "respondent_type": ["_any"]
+      },
+      "needs_verification": false,
+      "reviewed_by": null,
+      "stages": [
+        {
+          "id": "gather_facts",
+          "title": "Gather Facts",
+          "plain": "Collect and preserve all evidence, documents, and information related to your situation.",
+          "anticipate": ["Write down what happened while it is fresh",
+                         "Take photos, save texts and emails, note witnesses"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": [],
+          "done_signals": ["narrative", "evidence"],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "get_help",
+          "title": "Talk to Legal Help",
+          "plain": "Contact a licensed attorney, legal aid organization, or court help center for guidance on your situation.",
+          "anticipate": ["Many organizations offer free consultations",
+                         "A lawyer can explain deadlines that may apply"],
+          "typical_duration": null,
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": ["Attorney", "Legal aid", "Court help center"],
+          "done_signals": [],
+          "sources": [
+            {"label": "LawHelpNY", "url": "https://www.lawhelpny.org/", "tier": 2},
+            {"label": "NYC CourtHelp", "url": "https://www.nycourts.gov/courthelp/", "tier": 1}
+          ],
+          "branches": []
+        },
+        {
+          "id": "formal_filing",
+          "title": "Formal Claim or Filing",
+          "plain": "Depending on the situation, a formal claim, complaint, or filing is typically required to start the legal process.",
+          "anticipate": ["Deadlines vary widely by type of claim",
+                         "Some claims require a notice before a lawsuit can be filed"],
+          "typical_duration": "Varies",
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": ["Court", "Agency", "Attorney"],
+          "done_signals": ["actions_taken:filed"],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "response",
+          "title": "Response",
+          "plain": "The other side typically has an opportunity to respond to the claim.",
+          "anticipate": [],
+          "typical_duration": "Varies",
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": [],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        },
+        {
+          "id": "resolution",
+          "title": "Resolution",
+          "plain": "The matter is typically resolved through negotiation, mediation, hearing, or trial.",
+          "anticipate": ["Many matters settle without a trial"],
+          "typical_duration": "Varies widely",
+          "deadline_ref": null,
+          "documents": [],
+          "who_you_deal_with": [],
+          "done_signals": [],
+          "sources": [],
+          "branches": []
+        }
+      ]
+    }
+  ]
+}

@@ -27,6 +27,8 @@ from core.intake import (SLOT_LABELS, CaseFile, is_advice_seeking,
 from core.orchestrator import Orchestrator, MODEL, GUARDRAIL
 from core import voice
 from core.lawyer import claude_legal_chat, generate_irac_memo, memo_to_pdf
+from core.procedure import select_procedure, locate_stages
+from ui.procedure_map import render_procedure_map
 
 try:
     import anthropic as _anthropic_mod
@@ -1013,6 +1015,34 @@ elif orch.findings and _area:
       <a href="https://www.lawhelpny.org/" target="_blank" style="color:var(--cyan);">LawHelpNY</a> ·
       <a href="https://www.nycbar.org/get-legal-help/" target="_blank" style="color:var(--cyan);">NYC Bar Legal Referral</a>
     </div></div>""", unsafe_allow_html=True)
+
+# ------------------------------------------------------------------ LEGAL PROCEDURE MAP
+if case.primary_area:
+    _proc = select_procedure(
+        case.primary_area,
+        case.resolved_entity,
+        case.entity_confirmed,
+    )
+    if _proc:
+        _actions = case.facts.get("actions_taken", "")
+        # Build deadline data from the deadline engine
+        _dl_data = {}
+        if case.when_iso:
+            for _stage in _proc.get("stages", []):
+                _dref = _stage.get("deadline_ref")
+                if _dref and _dref == "notice_of_claim_90d":
+                    from core.deadlines import compute_deadline
+                    _rule = {"type": "days", "days_or_months": 90,
+                             "trigger": "incident_date"}
+                    _dl = compute_deadline(case.when_iso, _rule)
+                    _dl_data[_dref] = {
+                        "date": _dl.deadline_date.strftime("%B %d, %Y"),
+                        "days_remaining": _dl.days_remaining,
+                        "expired": _dl.is_expired,
+                    }
+        _proc_result = locate_stages(case.facts, _actions, _proc, _dl_data)
+        _map_html = render_procedure_map(_proc_result)
+        st.markdown(_map_html, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ voice follow-up chat (after research)
 if st.session_state.voice_mode and orch.findings and st.session_state.voice_messages:
