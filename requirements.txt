@@ -1,0 +1,4 @@
+streamlit>=1.40
+anthropic>=1.0
+python-dotenv>=1.0
+elevenlabs>=1.0

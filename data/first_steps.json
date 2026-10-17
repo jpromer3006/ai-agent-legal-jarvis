@@ -1,0 +1,56 @@
+[
+  {
+    "id": "tort-nyct-notice-of-claim",
+    "domain": "Torts / Personal Injury",
+    "respondent": "New York City Transit Authority",
+    "first_step_title": "File a Notice of Claim",
+    "plain_language_steps": [
+      "Get the Notice of Claim form from the NYC Comptroller website or in person at 1 Centre Street, Room 1225, New York, NY 10007.",
+      "Fill out the form with your name, the date and location of the incident, how you were hurt, and the amount you are claiming.",
+      "File the completed form with the NYC Comptroller AND serve a copy on the New York City Transit Authority. You can file by mail, in person, or through the Comptroller's e-filing portal.",
+      "Keep a copy of everything you file, along with proof of the date you mailed or delivered it.",
+      "After filing, you will be scheduled for a hearing called a 50-H hearing where the city's lawyers will ask you questions under oath."
+    ],
+    "deadline_rule": {
+      "type": "days",
+      "days_or_months": 90,
+      "trigger": "incident_date"
+    },
+    "where_to_file": "NYC Comptroller, 1 Centre Street, Room 1225, New York, NY 10007",
+    "citations": [
+      {
+        "label": "NY General Municipal Law 50-e (Notice of Claim)",
+        "url": "https://www.nysenate.gov/legislation/laws/GMU/50-E",
+        "tier": 1
+      },
+      {
+        "label": "NY General Municipal Law 50-i (Time Limit for Action)",
+        "url": "https://www.nysenate.gov/legislation/laws/GMU/50-I",
+        "tier": 1
+      },
+      {
+        "label": "NYC Comptroller - Filing a Claim",
+        "url": "https://comptroller.nyc.gov/services/for-the-public/claims/filing-a-claim/",
+        "tier": 1
+      },
+      {
+        "label": "NY Public Authorities Law 1212 (NYCTA as defendant)",
+        "url": "https://www.nysenate.gov/legislation/laws/PBA/1212",
+        "tier": 1
+      }
+    ],
+    "video": {
+      "status": "none",
+      "url": null,
+      "transcript": null
+    },
+    "reviewed_by": null,
+    "reviewed_on": null,
+    "needs_verification": true,
+    "_verification_notes": [
+      "90-day deadline per GML 50-e: VERIFY against current statute text",
+      "Comptroller address and e-filing portal: VERIFY current availability",
+      "50-H hearing: standard practice but timing varies, VERIFY"
+    ]
+  }
+]
