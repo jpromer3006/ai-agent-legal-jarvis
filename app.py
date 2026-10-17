@@ -1018,10 +1018,12 @@ elif orch.findings and _area:
 
 # ------------------------------------------------------------------ LEGAL PROCEDURE MAP
 if case.primary_area:
+    _pub_mentioned = "public_entity" in case.facts or case.resolved_entity is not None
     _proc = select_procedure(
         case.primary_area,
         case.resolved_entity,
         case.entity_confirmed,
+        public_entity_mentioned=_pub_mentioned,
     )
     if _proc:
         _actions = case.facts.get("actions_taken", "")

@@ -47,10 +47,15 @@ class ProcedureResult:
 
 
 def select_procedure(area: str, respondent: str | None,
-                     entity_confirmed: bool = False) -> dict | None:
+                     entity_confirmed: bool = False,
+                     public_entity_mentioned: bool = False) -> dict | None:
     """Match a case to the best procedure based on area and respondent.
 
-    Returns the procedure dict or None (which means use fallback).
+    When a public entity is resolved and confirmed, use the public entity
+    procedure. When the respondent is unknown but a public entity was
+    mentioned in any slot, use the generic fallback (never default to
+    private party). Only use private party when no public entity was
+    mentioned at all.
     """
     data = _load()
     procedures = data.get("procedures", [])
@@ -69,8 +74,8 @@ def select_procedure(area: str, respondent: str | None,
 
         # Check respondent type
         if "_private" in proc_types:
-            # Private party — matches when no public entity or unconfirmed
-            if not respondent or not entity_confirmed:
+            # Private party — only when no public entity was mentioned
+            if not public_entity_mentioned and (not respondent or not entity_confirmed):
                 return proc
         elif respondent and respondent in proc_types:
             return proc

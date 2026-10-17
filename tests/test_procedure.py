@@ -49,6 +49,21 @@ class TestSelectProcedure:
         assert proc is not None
         assert proc["id"] != "nyc-public-entity-tort"
 
+    # Cleanup 3 item 2: public entity always gets public procedure
+    def test_confirmed_public_entity_gets_public_procedure(self):
+        """When a public entity IS resolved and confirmed, use public entity procedure."""
+        proc = select_procedure("Torts / Personal Injury",
+                                "City of New York", True)
+        assert proc["id"] == "nyc-public-entity-tort"
+
+    def test_unknown_respondent_gets_fallback_not_private(self):
+        """When respondent is unknown but public entity mentioned, use fallback."""
+        proc = select_procedure("Torts / Personal Injury", None, False,
+                                public_entity_mentioned=True)
+        assert proc is not None
+        assert proc["id"] != "private-party-injury"
+        assert proc["id"] == "generic-fallback"
+
 
 class TestLocateStages:
     def test_incident_done_when_narrative_exists(self):
