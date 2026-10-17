@@ -624,17 +624,28 @@ LAWYER MODE<small>CLAUDE LEGAL · IRAC MEMORANDUM</small></div>
                     unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # PDF download
-        if st.session_state.pop("_download_pdf", False) or True:
-            _area = case.primary_area or "Legal Matter"
-            _pdf = memo_to_pdf(st.session_state.lawyer_memo, f"Memorandum — {_area}")
-            st.download_button(
-                label="DOWNLOAD MEMO AS PDF",
-                data=_pdf,
-                file_name=f"IRAC_Memo_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",
-                key="pdf_download"
-            )
+        # PDF — generate, save to case folder, and offer download
+        _area = case.primary_area or "Legal Matter"
+        _pdf = memo_to_pdf(st.session_state.lawyer_memo, f"Memorandum — {_area}")
+        _pdf_name = f"IRAC_Memo_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
+        # Auto-save to case folder
+        if case.folder:
+            case.folder.mkdir(parents=True, exist_ok=True)
+            _pdf_path = case.folder / _pdf_name
+            _pdf_path.write_bytes(_pdf)
+            st.markdown(
+                f'<div style="font-size:11px; color:#c4b48a; margin:6px 0;">'
+                f'Saved to: <code>{_pdf_path}</code></div>',
+                unsafe_allow_html=True)
+
+        st.download_button(
+            label="DOWNLOAD MEMO AS PDF",
+            data=_pdf,
+            file_name=_pdf_name,
+            mime="application/pdf",
+            key="pdf_download"
+        )
 
     st.markdown("""
     <div style="text-align:center; margin-top:20px; font-size:10px; color:#8a7a5a; letter-spacing:.15em;">
