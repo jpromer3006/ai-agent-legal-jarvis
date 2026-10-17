@@ -262,7 +262,13 @@ class Orchestrator:
             facts = data.get("facts") or {slot: answer}
             case.facts.update({k: v for k, v in facts.items() if v})
             case.facts.setdefault(slot, answer)
-            case.timeline.extend(data.get("timeline", []))
+            # Dedupe timeline entries by (date, event)
+            existing = {(e.get("date"), e.get("event")) for e in case.timeline}
+            for entry in data.get("timeline", []):
+                key = (entry.get("date"), entry.get("event"))
+                if key not in existing:
+                    case.timeline.append(entry)
+                    existing.add(key)
 
         # Post-extraction: normalize date and resolve entity
         from .intake import normalize_date, resolve_public_entity
@@ -390,23 +396,35 @@ class Orchestrator:
 
     # -------------------------------------------------------- ValidatorAgent
     def _validate(self) -> None:
-        """Validate findings using only cited sources (not all consulted)."""
+        """Validate findings using only cited sources (not all consulted).
+
+        VERIFIED requires a cited T1 or T2 source with cited_text.
+        News (T3) and blogs (T5) can never make a finding VERIFIED — at best PARTIAL.
+        Confidence shown as HIGH/MEDIUM/LOW, not percentage.
+        """
         for f in self.findings:
+            cited_t1_t2 = [s for s in f.sources if s.tier <= 2]
+            cited_with_text = [s for s in cited_t1_t2 if s.snippet]
             cited_tiers = {s.tier for s in f.sources}
-            cited_with_text = [s for s in f.sources if s.snippet]
-            if cited_with_text and (1 in cited_tiers or 2 in cited_tiers):
+
+            if cited_with_text:
                 f.status = "verified"
-            elif 1 in cited_tiers or 2 in cited_tiers:
+            elif cited_t1_t2:
                 f.status = "partial"
-            elif 3 in cited_tiers:
+            elif 3 in cited_tiers or 6 in cited_tiers:
                 f.status = "partial"
             else:
                 f.status = "unsupported"
+
+            # Confidence label
+            score = f.score
+            conf = "HIGH" if score >= 0.7 else ("MEDIUM" if score >= 0.4 else "LOW")
+
             self._log("ValidatorAgent",
                        f"'{f.title}' {f.status.upper()} "
                        f"({len(f.sources)} cited, "
                        f"{len(f.consulted)} consulted, "
-                       f"conf {f.score:.0%})")
+                       f"confidence {conf})")
 
 
 def demo_findings(area: str) -> list[Finding]:

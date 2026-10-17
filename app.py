@@ -939,7 +939,7 @@ if orch.findings:
             st.markdown(f"""
 <div class="panel"><div class="ptitle">{esc(f.title).upper()} <span>{esc(f.agent)}</span></div>
 <span class="chip {cls}">{f.status.upper()}</span>
-<div class="finding" style="margin-top:8px">{esc(f.body)}</div></div>""", unsafe_allow_html=True)
+<div class="finding" style="margin-top:8px">{esc(f.body).replace(chr(10), "<br>")}</div></div>""", unsafe_allow_html=True)
 
     # Validator summary line
     st.markdown(render_validator_summary(orch.findings), unsafe_allow_html=True)
