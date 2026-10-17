@@ -201,10 +201,10 @@ if not st.session_state.consent_given:
     color:#29e6ff; text-shadow:0 0 20px rgba(41,230,255,.7); margin-bottom:30px;">
     J.A.R.V.I.S.</div>
   <div style="font-size:20px; line-height:2; color:#e9fbff; text-shadow:0 0 6px rgba(41,230,255,.3);">
-    This system provides <b style="color:#29e6ff;">legal information</b>, not legal advice.<br>
-    It does <b style="color:#ff4d6d;">not</b> replace a licensed attorney.<br>
-    Always confirm deadlines with a legal aid or lawyer.<br>
-    All responses are informational only.<br>
+    This is an <b style="color:#29e6ff;">educational prototype</b> for general legal information only.<br>
+    It is <b style="color:#ff4d6d;">not</b> legal advice and does not replace a licensed attorney.<br>
+    Any deadline shown is an estimate — confirm with a lawyer or legal aid.<br>
+    Do not rely on this tool for a real claim.<br>
     <span style="color:#ffb347;">By continuing you acknowledge this disclaimer.</span>
   </div>
 </div>""", unsafe_allow_html=True)

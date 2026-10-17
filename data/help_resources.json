@@ -1,0 +1,37 @@
+[
+  {
+    "name": "NYC Court Help Centers",
+    "url": "https://www.nycourts.gov/courthelp/",
+    "description": "Free help from trained staff at courthouses across NYC",
+    "needs_verification": true,
+    "reviewed_by": null
+  },
+  {
+    "name": "LawHelpNY",
+    "url": "https://www.lawhelpny.org/",
+    "description": "Free legal information and referrals for New Yorkers",
+    "needs_verification": true,
+    "reviewed_by": null
+  },
+  {
+    "name": "Legal Aid Society",
+    "url": "https://www.legalaidnyc.org/",
+    "description": "Free legal services for low-income New Yorkers",
+    "needs_verification": true,
+    "reviewed_by": null
+  },
+  {
+    "name": "NYC Bar Legal Referral Service",
+    "url": "https://www.nycbar.org/get-legal-help/",
+    "description": "Attorney referrals from the NYC Bar Association",
+    "needs_verification": true,
+    "reviewed_by": null
+  },
+  {
+    "name": "CourtHelp (NYS)",
+    "url": "https://www.nycourts.gov/courthelp/",
+    "description": "New York State courts self-help resources",
+    "needs_verification": true,
+    "reviewed_by": null
+  }
+]
