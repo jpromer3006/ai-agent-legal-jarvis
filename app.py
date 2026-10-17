@@ -436,15 +436,40 @@ def _lawyer_mode_ui():
     """Full Lawyer Mode interface: Claude Legal chat + IRAC memo + PDF download."""
     st.markdown(LAWYER_CSS, unsafe_allow_html=True)
 
+    # Handoff consent screen (shown once)
+    if not st.session_state.get("lawyer_consent_given"):
+        st.markdown("""
+<div class="lawyer-panel" style="max-width:680px; margin:40px auto; text-align:center;">
+<div class="lawyer-title">LAWYER MODE — HANDOFF CONSENT</div>
+<div style="font-size:14px; color:#f5e6c8; line-height:1.7;">
+This will transfer the case facts, research findings, and sources<br>
+from the JARVIS intake into Lawyer Mode for attorney review.<br><br>
+This is an <b style="color:#ffd700;">educational demo</b>. No attorney-client<br>
+relationship is created by using this tool.<br><br>
+<span style="color:#ffb347;">By continuing you consent to this transfer.</span>
+</div>
+</div>""", unsafe_allow_html=True)
+        if st.button("I CONSENT — ENTER LAWYER MODE"):
+            st.session_state.lawyer_consent_given = True
+            # Log consent in case
+            case.transcript.append({"role": "system",
+                "text": f"Lawyer Mode handoff consent given at {time.strftime('%H:%M:%S')}"})
+            case.save()
+            st.rerun()
+        if st.button("CANCEL — BACK TO JARVIS", key="lawyer_cancel"):
+            st.session_state.lawyer_mode = False
+            st.rerun()
+        return
+
     # Top bar
     st.markdown(f"""
-    <div class="topbar" style="border-color:rgba(255,215,0,.35);">
-      <div class="brand" style="color:#ffd700; text-shadow:0 0 12px rgba(255,215,0,.6);">
-        LAWYER MODE<small>CLAUDE LEGAL · IRAC MEMORANDUM</small></div>
-      <div><span class="chip" style="color:#ffd700; border-color:#ffd700;">PRIVILEGED</span>
-      <span class="chip">CASE {esc(case.created)}</span>
-      <span class="chip">{time.strftime('%a %b %d  %H:%M')}</span></div>
-    </div>""", unsafe_allow_html=True)
+<div class="topbar" style="border-color:rgba(255,215,0,.35);">
+<div class="brand" style="color:#ffd700; text-shadow:0 0 12px rgba(255,215,0,.6);">
+LAWYER MODE<small>CLAUDE LEGAL · IRAC MEMORANDUM</small></div>
+<div><span class="chip" style="color:#ffd700; border-color:#ffd700;">EDUCATIONAL DEMO</span>
+<span class="chip">CASE {esc(case.created)}</span>
+<span class="chip">{time.strftime('%a %b %d  %H:%M')}</span></div>
+</div>""", unsafe_allow_html=True)
     st.write("")
 
     # Controls
@@ -563,20 +588,41 @@ def _lawyer_mode_ui():
             )
         st.session_state.lawyer_memo = memo
         case.save()
-        # Save memo to case folder
         if case.folder:
             (case.folder / "irac_memo.txt").write_text(memo)
+        # Verify citations via CourtListener
+        from sources.courtlistener import verify_memo_citations
+        st.session_state.lawyer_citations = verify_memo_citations(memo)
         st.rerun()
 
     # Display memo if generated
     if st.session_state.lawyer_memo:
         st.markdown("---")
-        st.markdown("""
-        <div class="lawyer-panel">
-          <div class="lawyer-title">IRAC MEMORANDUM OF LAW</div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="lawyer-panel">'
+            '<div class="lawyer-title">IRAC MEMORANDUM OF LAW</div>'
+            '</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="memo-text">{esc(st.session_state.lawyer_memo)}</div>',
                     unsafe_allow_html=True)
+
+        # Citation verification table
+        _cites = st.session_state.get("lawyer_citations", [])
+        if _cites:
+            st.markdown(
+                '<div class="lawyer-panel">'
+                '<div class="lawyer-title">CITATION VERIFICATION (CourtListener)</div>',
+                unsafe_allow_html=True)
+            for c in _cites:
+                _v_color = "#3dffb5" if c["verified"] else "#ff4d6d"
+                _v_label = "VERIFIED" if c["verified"] else "NOT FOUND"
+                _link = f'<a href="{esc(c["url"])}" target="_blank" style="color:#ffd700;">{esc(c["case_name"])}</a>' if c["url"] else ""
+                st.markdown(
+                    f'<div style="padding:4px 0; border-bottom:1px dashed rgba(255,215,0,.15); font-size:12px;">'
+                    f'<span style="color:{_v_color}; font-size:10px; border:1px solid {_v_color}; '
+                    f'padding:1px 6px; margin-right:8px; letter-spacing:.1em;">{_v_label}</span>'
+                    f'{esc(c["citation"])} {_link}</div>',
+                    unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         # PDF download
         if st.session_state.pop("_download_pdf", False) or True:
