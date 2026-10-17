@@ -78,6 +78,57 @@ class TestEntityResolver:
         assert len(entities) >= 5
         assert "Long Island Rail Road" in entities
 
+    # --- Cleanup 3 item 1: City of New York across boroughs ---
+    def test_pothole_brooklyn(self):
+        assert resolve_public_entity("I tripped in a pothole in Brooklyn") == "City of New York"
+
+    def test_sidewalk_manhattan(self):
+        assert resolve_public_entity("Cracked sidewalk in Manhattan caused me to fall") == "City of New York"
+
+    def test_crosswalk_queens(self):
+        assert resolve_public_entity("Hit by a car in a crosswalk in Queens") == "City of New York"
+
+    def test_roadway_bronx(self):
+        assert resolve_public_entity("Dangerous roadway condition in the Bronx") == "City of New York"
+
+    def test_park_staten_island(self):
+        assert resolve_public_entity("Fell in a park on Staten Island") == "City of New York"
+
+    def test_playground_harlem(self):
+        assert resolve_public_entity("My child was hurt on a playground in Harlem, Manhattan") == "City of New York"
+
+    def test_public_school_bronx(self):
+        assert resolve_public_entity("Slipped at a public school in the Bronx") == "City of New York"
+
+    def test_the_city_pothole(self):
+        assert resolve_public_entity("The city never fixed the pothole on my street") == "City of New York"
+
+    def test_city_street_no_borough(self):
+        """city street with implied NYC context."""
+        assert resolve_public_entity("I fell on a city street near Times Square") == "City of New York"
+
+    def test_city_of_new_york_explicit(self):
+        assert resolve_public_entity("City of New York is responsible") == "City of New York"
+
+    def test_new_york_city_sidewalk(self):
+        assert resolve_public_entity("New York City sidewalk was broken") == "City of New York"
+
+    # Negatives — private and non-NYC
+    def test_private_store_no_match(self):
+        assert resolve_public_entity("I slipped in a Walgreens in Manhattan") is None
+
+    def test_private_building_no_match(self):
+        assert resolve_public_entity("Fell in the lobby of my apartment building") is None
+
+    def test_non_nyc_town_no_match(self):
+        assert resolve_public_entity("Pothole in Albany on the main road") is None
+
+    def test_private_parking_lot(self):
+        assert resolve_public_entity("Tripped in a mall parking lot in Brooklyn") is None
+
+    def test_restaurant_no_match(self):
+        assert resolve_public_entity("Slipped in a restaurant on Broadway") is None
+
 
 # ---------------------------------------------------------------------------
 # P0.6: Date normalizer with confidence

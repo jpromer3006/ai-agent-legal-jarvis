@@ -11,6 +11,22 @@
     "gas station", "police station", "fire station", "personal trainer",
     "train station of", "freight train", "cargo train"
   ],
+  "nyc_location_markers": [
+    "manhattan", "brooklyn", "queens", "bronx", "staten island",
+    "new york city", "nyc", "harlem", "times square", "midtown",
+    "downtown", "uptown", "east village", "west village", "soho",
+    "tribeca", "williamsburg", "bushwick", "astoria", "flushing",
+    "jamaica", "bed-stuy", "bed stuy", "crown heights", "flatbush",
+    "bay ridge", "sunset park", "coney island", "brighton beach",
+    "the bronx", "morrisania", "fordham", "riverdale", "hunts point",
+    "jackson heights", "corona", "long island city", "lic",
+    "st. george", "tottenville"
+  ],
+  "public_location_phrases": [
+    "pothole", "sidewalk", "crosswalk", "roadway", "city street",
+    "park", "playground", "public school", "city road", "street",
+    "intersection", "curb", "median", "bike lane", "bus stop"
+  ],
   "entities": [
     {
       "name": "Long Island Rail Road",
@@ -49,13 +65,18 @@
     },
     {
       "name": "City of New York",
-      "patterns": ["\\bnyc\\b.*\\b(?:pothole|sidewalk|park|playground|school)\\b", "\\bcity of new york\\b"],
+      "patterns": [
+        "\\bcity of new york\\b",
+        "\\bnew york city\\b.*\\b(?:pothole|sidewalk|crosswalk|roadway|park|playground|school|street|curb)\\b",
+        "\\bthe city\\b.*\\b(?:pothole|sidewalk|crosswalk|roadway|park|playground|school|street|never fixed)\\b"
+      ],
+      "match_mode": "location_plus_public_place",
       "needs_verification": true,
       "reviewed_by": null
     },
     {
       "name": "New York City Housing Authority",
-      "patterns": ["\\bnycha\\b", "\\bpublic housing\\b.*\\bnyc\\b"],
+      "patterns": ["\\bnycha\\b", "\\bpublic housing\\b.*\\b(?:nyc|manhattan|brooklyn|queens|bronx|staten island)\\b"],
       "needs_verification": true,
       "reviewed_by": null
     },

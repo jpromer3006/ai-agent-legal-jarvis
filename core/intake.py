@@ -201,12 +201,32 @@ def _load_entity_rules() -> dict:
     return _ENTITY_CACHE
 
 
+def _has_nyc_location(text: str, rules: dict) -> bool:
+    """Check if text mentions an NYC location (borough, neighborhood, etc.)."""
+    for marker in rules.get("nyc_location_markers", []):
+        if re.search(r"\b" + re.escape(marker) + r"\b", text):
+            return True
+    return False
+
+
+def _has_public_place(text: str, rules: dict) -> bool:
+    """Check if text mentions a public location (sidewalk, park, etc.)."""
+    for phrase in rules.get("public_location_phrases", []):
+        if re.search(r"\b" + re.escape(phrase) + r"\b", text):
+            return True
+    return False
+
+
 def resolve_public_entity(text: str) -> str | None:
     """Map free text to a public entity respondent, or None if uncertain.
 
     Uses word-boundary regex rules from data/public_entities.json.
     Most specific entities are checked first (LIRR before NYCT).
     Non-MTA guards prevent false positives (Amtrak, gas station, etc.).
+
+    For City of New York: matches when a public location phrase (pothole,
+    sidewalk, park, etc.) appears alongside an NYC location marker (any
+    borough, neighborhood, or "the city").
     """
     rules = _load_entity_rules()
     low = text.lower()
@@ -218,9 +238,19 @@ def resolve_public_entity(text: str) -> str | None:
 
     # Check entities in order (most specific first)
     for entity in rules.get("entities", []):
-        for pattern in entity["patterns"]:
-            if re.search(pattern, low):
+        # Special match mode: public place + NYC location
+        if entity.get("match_mode") == "location_plus_public_place":
+            # First try explicit patterns (e.g., "city of new york")
+            for pattern in entity["patterns"]:
+                if re.search(pattern, low):
+                    return entity["name"]
+            # Then try the general rule: public place + NYC location
+            if _has_public_place(low, rules) and _has_nyc_location(low, rules):
                 return entity["name"]
+        else:
+            for pattern in entity["patterns"]:
+                if re.search(pattern, low):
+                    return entity["name"]
 
     return None
 
