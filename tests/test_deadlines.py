@@ -46,9 +46,10 @@ class TestComputeDeadline:
         assert r.deadline_date == date(2027, 4, 14)
 
     def test_months_clamp_end_of_month(self):
-        # Jan 31 + 1 month should be Feb 28 (non-leap)
+        # Jan 31 + 1 month should be Feb 28 (non-leap), before rollover
         r = compute_deadline("2026-01-31", {"type": "months", "days_or_months": 1,
-                             "trigger": "incident_date"}, today=date(2026, 1, 31))
+                             "trigger": "incident_date"}, today=date(2026, 1, 31),
+                             apply_rollover=False)
         assert r.deadline_date == date(2026, 2, 28)
 
     def test_invalid_date_raises(self):
@@ -63,6 +64,45 @@ class TestComputeDeadline:
     def test_label(self):
         r = compute_deadline("2026-10-14", self.RULE_90_DAYS, today=date(2026, 10, 14))
         assert "90 days" in r.label
+
+    # Cleanup 3 item 4: weekend and holiday rollover
+    def test_saturday_rolls_to_monday(self):
+        # 2026-07-20 + 90 days = 2026-10-18 (Sunday) → 2026-10-19 (Monday)
+        r = compute_deadline("2026-07-20", self.RULE_90_DAYS, today=date(2026, 7, 20))
+        assert r.deadline_date.weekday() < 5  # weekday
+        assert r.rolled_from is not None
+
+    def test_sunday_rolls_to_monday(self):
+        # 2026-07-19 + 90 days = 2026-10-17 (Saturday) → 2026-10-19 (Monday)
+        r = compute_deadline("2026-07-19", self.RULE_90_DAYS, today=date(2026, 7, 19))
+        assert r.deadline_date.weekday() < 5
+        assert r.rolled_from is not None
+
+    def test_holiday_rolls_forward(self):
+        # If deadline lands on 2026-12-25 (Christmas, Friday), roll to 2026-12-28 (Monday)
+        # Need to find an incident date where + 90 days = Dec 25
+        # Sep 26 + 90 = Dec 25, 2026 (Friday)
+        r = compute_deadline("2026-09-26", self.RULE_90_DAYS, today=date(2026, 9, 26))
+        assert r.deadline_date != date(2026, 12, 25)
+        assert r.rolled_from == date(2026, 12, 25)
+
+    def test_weekday_no_rollover(self):
+        # 2026-10-01 + 90 days = 2026-12-30 (Wednesday) — no rollover
+        r = compute_deadline("2026-10-01", self.RULE_90_DAYS, today=date(2026, 10, 1))
+        assert r.deadline_date == date(2026, 12, 30)
+        assert r.rolled_from is None
+
+    def test_new_years_2027_rolls(self):
+        # 2027-01-01 is a holiday (Friday in 2027? Let's check)
+        # Oct 3 2026 + 90 = Jan 1 2027
+        r = compute_deadline("2026-10-03", self.RULE_90_DAYS, today=date(2026, 10, 3))
+        assert r.deadline_date != date(2027, 1, 1)
+        assert r.rolled_from == date(2027, 1, 1)
+
+    def test_rollover_disabled(self):
+        r = compute_deadline("2026-07-20", self.RULE_90_DAYS,
+                             today=date(2026, 7, 20), apply_rollover=False)
+        assert r.rolled_from is None
 
 
 # ---------------------------------------------------------------------------
