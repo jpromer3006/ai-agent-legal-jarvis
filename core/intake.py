@@ -319,6 +319,8 @@ class CaseFile:
     stage_report: dict = field(default_factory=dict)
     flashpoint: dict = field(default_factory=dict)              # community lens results
     workflow: dict = field(default_factory=dict)                # firm workflow state
+    service_answers: dict = field(default_factory=dict)         # first: service needs survey
+    service_profile: dict = field(default_factory=dict)
     folder: Path | None = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -353,6 +355,11 @@ class CaseFile:
 
     def summary_text(self) -> str:
         lines = [f"{SLOT_LABELS.get(k, k)}: {v}" for k, v in self.facts.items()]
+        sp = self.service_profile
+        if sp:
+            lines.insert(0, f"Service plan ({sp.get('priority')}): {sp.get('service')} Need: {sp.get('need')}. "
+                            f"Pain point: {sp.get('pain_point')}. Feels: {sp.get('sentiment')}. "
+                            f"Contact: {sp.get('contact')}. Language: {sp.get('language')}.")
         return "\n".join(lines)
 
     def save(self) -> Path:
@@ -378,6 +385,8 @@ class CaseFile:
             "stage_report": self.stage_report,
             "flashpoint": self.flashpoint,
             "workflow": self.workflow,
+            "service_answers": self.service_answers,
+            "service_profile": self.service_profile,
         }
         out = self.folder / "case.json"
         out.write_text(json.dumps(data, indent=2, ensure_ascii=False))

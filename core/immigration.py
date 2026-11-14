@@ -278,6 +278,73 @@ def segment_of(ans: dict) -> str:
     return "fearful_but_aware" if worry in (2, 3, 4) else "disengaged_isolated"
 
 
+# ---------------------------------------------------------------- service needs survey
+# FIRST process. Flashpoint designs and pre tests this instrument (synthetic panels per
+# language community); JARVIS administers it on screen in the person's language.
+# It tells a lawyer HOW to serve the person. It never asks about legal status.
+SERVICE_SURVEY: list[dict] = [
+    {"id": "urgent", "q": "Do you have an immigration court date or a deadline in the next 14 days?",
+     "options": ["Yes", "No", "I am not sure"]},
+    {"id": "detained", "q": "Is someone in your family detained by immigration right now?",
+     "options": ["Yes", "No", "I prefer not to say"]},
+    {"id": "need", "q": "What do you most need help with?",
+     "options": ["A case in immigration court", "Asylum or protection", "A work permit",
+                 "Bringing or keeping family together", "A green card or citizenship", "I am not sure"]},
+    {"id": "pain", "q": "What is hardest for you right now?",
+     "options": ["Waiting a long time with no answer", "Not being able to work legally",
+                 "Fear of being detained or deported", "Being separated from family",
+                 "Not understanding the papers or the language", "Paying for help"]},
+    {"id": "feeling", "q": "How do you feel about asking a lawyer for help?",
+     "options": ["Comfortable", "A little nervous", "Very afraid", "I do not trust lawyers"]},
+    {"id": "helper", "q": "Who is helping you now?",
+     "options": ["A lawyer", "A free legal aid group", "A notario or form preparer", "Nobody yet"]},
+    {"id": "pay", "q": "Can you pay for a lawyer?",
+     "options": ["Yes", "A little, or in payments", "No, I need free help", "I am not sure"]},
+    {"id": "interp", "q": "Do you need an interpreter to talk with a lawyer?",
+     "options": ["Yes", "No", "Sometimes"]},
+    {"id": "contact", "q": "How should a lawyer contact you?",
+     "options": ["Phone call", "WhatsApp", "Text message", "Email", "In person"]},
+]
+
+
+def service_profile(ans: dict, language: str) -> dict:
+    """Turn the service survey into a lawyer facing service plan (information for staff)."""
+    g = lambda k: ans.get(k, -1)
+    urgent = g("urgent") == 0 or g("detained") == 0
+    need = SERVICE_SURVEY[2]["options"][g("need")] if g("need") >= 0 else "Not stated"
+    pain = SERVICE_SURVEY[3]["options"][g("pain")] if g("pain") >= 0 else "Not stated"
+    feeling = SERVICE_SURVEY[4]["options"][g("feeling")] if g("feeling") >= 0 else "Not stated"
+    contact = SERVICE_SURVEY[8]["options"][g("contact")] if g("contact") >= 0 else "Not stated"
+    free = g("pay") in (2, 3)
+    if g("detained") == 0:
+        service = "Emergency: detained family member. Same day referral to free removal defense help."
+    elif g("urgent") == 0:
+        service = "Urgent: deadline within 14 days. Same day consultation or legal aid referral."
+    elif free:
+        service = "Free legal help: ActionNYC or a DOJ accredited legal aid provider."
+    elif g("need") == 0:
+        service = "Full representation consultation (removal defense)."
+    elif g("pay") == 1:
+        service = "Limited scope consultation with a payment plan."
+    else:
+        service = "Initial consultation."
+    approach = {0: "Direct and detailed.", 1: "Explain each step before it happens.",
+                2: "Lead with rights and safety; short sentences; no pressure.",
+                3: "Build trust first: explain who you are, that help is confidential, and how fees work."}.get(g("feeling"), "")
+    flags = []
+    if g("helper") == 2:
+        flags.append("A notario is involved: check for incorrect filings.")
+    if g("interp") in (0, 2) or language != "English":
+        flags.append(f"Book a {language if language != 'English' else 'qualified'} interpreter.")
+    if g("detained") == 0:
+        flags.append("ICE Online Detainee Locator: locator.ice.gov")
+    return {"priority": "URGENT" if urgent else "STANDARD", "service": service, "need": need,
+            "pain_point": pain, "sentiment": feeling, "approach": approach,
+            "contact": contact, "language": language,
+            "interpreter": g("interp") in (0, 2) or language != "English",
+            "free_help": free, "flags": flags}
+
+
 # ---------------------------------------------------------------- survey
 # English is canonical. The app renders each question and option in the
 # person's language through dialect.translate() with Flashpoint calibration.

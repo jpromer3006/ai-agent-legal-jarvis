@@ -41,7 +41,7 @@ from ui.immigration_view import render_stage_map, render_flashpoint_panel, CSS a
 from core import dialect
 from core.languages import LANGUAGES, TEST_LANGUAGES, lang as lang_spec
 from core.flashpoint import FlashpointClient
-from core.immigration import SURVEY, score_survey, GAP_SURVEY
+from core.immigration import SURVEY, score_survey, GAP_SURVEY, SERVICE_SURVEY, service_profile
 from core import workflow as wfm
 from ui.workflow_view import render_tracker, render_events
 import json as _json
@@ -544,7 +544,7 @@ LAWYER MODE<small>CLAUDE LEGAL · IRAC MEMORANDUM</small></div>
     if case.facts:
         st.markdown(f"""
         <div class="lawyer-panel">
-          <div class="lawyer-title">CASE SUMMARY — TRANSFERRED FROM JARVIS</div>
+          <div class="lawyer-title">CASE SUMMARY (SERVICE PLAN FIRST) — TRANSFERRED FROM JARVIS</div>
           <div class="lawyer-body">{esc(case.summary_text())}</div>
         </div>""", unsafe_allow_html=True)
 
@@ -715,6 +715,78 @@ if not st.session_state.booted:
     _ask("Good day. I'm JARVIS. I help people understand where they are in the immigration "
          "process, the rules that apply, and the official forms. This is information, not legal advice. " + q)
 
+# ================================================================== STEP 1: SERVICE NEEDS SURVEY (first process)
+if not case.service_profile:
+    st.markdown(IMM_CSS, unsafe_allow_html=True)
+    st.markdown("""
+<div style="text-align:center;margin:18px 0 6px;font-family:'Orbitron',sans-serif;font-size:22px;
+  letter-spacing:.3em;color:#29e6ff;text-shadow:0 0 18px rgba(41,230,255,.6)">J.A.R.V.I.S.</div>
+<div style="text-align:center;font-size:11px;letter-spacing:.3em;color:#7ff3ff">
+  STEP 1 · SERVICE NEEDS SURVEY · DESIGNED WITH FLASHPOINT.AI</div>""", unsafe_allow_html=True)
+    _c = st.columns([1, 2, 1])
+    with _c[1]:
+        _langs = list(LANGUAGES)
+        _lp = st.radio("Choose your language", _langs, horizontal=True,
+                       index=_langs.index(case.language),
+                       format_func=lambda n: LANGUAGES[n]["native"] if n != "English" else "English",
+                       key="sv_lang")
+        if _lp != case.language:
+            case.language = _lp
+            st.session_state.voice_lang = _lp
+            for m in case.transcript:
+                if m["role"] == "jarvis":
+                    m["text_local"] = _local(m["text"]); m["lang"] = _lp
+            st.rerun()
+        _intro = ("Nine quick questions so a lawyer knows how to help you. "
+                  "We never ask about your immigration status here. You can answer I am not sure.")
+        _flat = [_intro]
+        for it in SERVICE_SURVEY:
+            _flat += [it["q"]] + it["options"]
+        with st.spinner("Preparing the questions in your language"):
+            _tr = dialect.translate_batch(_flat, case.language, "", _calibration())
+        _rtl = ' dir="rtl" style="text-align:right"' if lang_spec(case.language)["rtl"] else ""
+        st.markdown(f'<div class="panel"{_rtl}><div class="log" style="font-size:14px;color:#d8f6ff">{esc(_tr[0])}</div></div>',
+                    unsafe_allow_html=True)
+        with st.form("service_survey"):
+            _ans, _i = {}, 1
+            for it in SERVICE_SURVEY:
+                q, opts = _tr[_i], _tr[_i + 1:_i + 1 + len(it["options"])]
+                _i += 1 + len(it["options"])
+                _ans[it["id"]] = st.radio(q, list(range(len(opts))), format_func=lambda i, o=opts: o[i],
+                                          index=None, key=f"ss_{it['id']}")
+            _go = st.form_submit_button("CONTINUE")
+        if _go:
+            case.service_answers = {k: v for k, v in _ans.items() if v is not None}
+            case.service_profile = service_profile(case.service_answers, case.language)
+            orch._log("SurveyAgent", f"service plan: {case.service_profile['priority']} · "
+                                     f"{case.service_profile['need']} · {case.service_profile['sentiment']}")
+            _comm = lang_spec(case.language).get("community")
+            if _comm:
+                _r = fp.demographics(_comm["location"], audience=_comm["label"],
+                                     question=f"Share speaking {case.language} at home and English proficiency.")
+                orch._log("FlashpointAgent", f"community lens {_r.source} ({_r.seconds:.1f}s)")
+            if case.service_profile["priority"] == "URGENT":
+                _ask("This sounds urgent. Please call ActionNYC now at 1-800-354-0365, or 311 and say "
+                     "'ActionNYC', for free help today. I will keep going so a lawyer has your information.")
+            case.save()
+            st.rerun()
+    st.stop()
+
+
+def _service_panel() -> str:
+    sp = case.service_profile
+    if not sp:
+        return ""
+    col = "#ff4d6d" if sp["priority"] == "URGENT" else "#29e6ff"
+    rows = "".join(f'<div class="fact"><b>{k}</b><span>{esc(v)}</span></div>' for k, v in [
+        ("SERVICE", sp["service"]), ("NEED", sp["need"]), ("PAIN POINT", sp["pain_point"]),
+        ("SENTIMENT", sp["sentiment"]), ("APPROACH", sp["approach"]), ("CONTACT", sp["contact"]),
+        ("LANGUAGE", sp["language"] + (" · interpreter" if sp["interpreter"] else ""))])
+    flags = "".join(f'<div class="log" style="color:#ffb347">⚑ {esc(f)}</div>' for f in sp["flags"])
+    return (f'<div class="panel" style="border-color:{col}"><div class="ptitle">SERVICE PLAN FOR THE LAWYER '
+            f'<span style="color:{col}">{sp["priority"]}</span></div>{rows}{flags}</div>')
+
+
 # ------------------------------------------------------------------ input handling
 def _handle_answer(raw: str, source: str = "typed", stt: dict | None = None) -> None:
     """One answer from the person, typed or spoken, in any of the four languages."""
@@ -881,6 +953,7 @@ left, center, right = st.columns([1.15, 1.3, 1.15], gap="medium")
 
 # ------------------------------------------------------------------ LEFT: intake
 with left:
+    st.markdown(_service_panel(), unsafe_allow_html=True)
     _lm = next((m for m in reversed(case.transcript) if m["role"] == "jarvis"), {"text": ""})
     last_q = _lm.get("text_local") or _lm["text"]
     _rtl = ' dir="rtl" style="text-align:right"' if lang_spec(case.language)["rtl"] else ""
@@ -1022,7 +1095,7 @@ with center:
                 st.rerun()
         with b3:
             if st.button("NEW CASE"):
-                for k in ("case", "orch", "booted", "consent_given", "survey_open", "fp_lens"):
+                for k in ("case", "orch", "booted", "consent_given", "survey_open", "fp_lens", "sv_lang"):
                     st.session_state.pop(k, None)
                 st.rerun()
     else:
@@ -1066,7 +1139,7 @@ with center:
                 st.rerun()
         with v3:
             if st.button("NEW CASE", key="vnew"):
-                for k in ("case", "orch", "booted", "consent_given", "survey_open", "fp_lens"):
+                for k in ("case", "orch", "booted", "consent_given", "survey_open", "fp_lens", "sv_lang"):
                     st.session_state.pop(k, None)
                 st.rerun()
 
@@ -1135,6 +1208,13 @@ with right:
         {"live": fp.live, "address": fp.address or (fp.mode if fp.live else None),
          "spent": fp.spent_usdc()},
         st.session_state.get("fp_lens"), _calibration(), _descriptor, fp.log), unsafe_allow_html=True)
+    _fl = os.getenv("FLASHLIGHT_URL", "http://localhost:3000")
+    st.markdown(f'<div class="panel"><div class="ptitle">COMMUNITY RESEARCH // FLASHLIGHT</div>'
+                f'<div class="log">Team research engine (Khalefa): measures the say vs do gap for a whole '
+                f'community and buys Flashpoint evidence only when it narrows the uncertainty enough per dollar.</div>'
+                f'<div class="rule"><a href="{esc(_fl)}" target="_blank">Open Flashlight dashboard ↗</a> '
+                f'<span class="log">(run <code>npm run dev</code> in the flashlight folder)</span></div></div>',
+                unsafe_allow_html=True)
     _gm = _gap_map()
     if _gm:
         _rows = ""
