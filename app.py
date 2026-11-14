@@ -851,6 +851,14 @@ with _tb_right:
         st.session_state.voice_lang = _pick
         case.dialect = {}
         orch._log("JARVIS", f"language set to {_pick}")
+        try:
+            _wm = _json.loads(_CAL_FILE.read_text()).get(_pick, {}).get("winning_message", "")
+        except Exception:
+            _wm = ""
+        if _wm:
+            orch._log("FlashpointAgent", f"opening with community tested message: {_wm}")
+            case.transcript.insert(len(case.transcript) - 1, {"role": "jarvis", "text": _wm,
+                                   "text_local": dialect.translate(_wm, _pick), "lang": _pick})
         # re render the current question in the new language
         for m in reversed(case.transcript):
             if m["role"] == "jarvis":

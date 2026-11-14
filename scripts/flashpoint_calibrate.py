@@ -32,7 +32,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")
 
 from core.flashpoint import FlashpointClient  # noqa: E402
-from core.immigration import GAP_SURVEY, SURVEY  # noqa: E402
+from core.immigration import GAP_SURVEY, MESSAGES, SURVEY  # noqa: E402
 from core.languages import LANGUAGES, TEST_LANGUAGES  # noqa: E402
 
 OUT = ROOT / "data" / "flashpoint_calibration.json"
@@ -59,6 +59,8 @@ def survey_brief(language: str) -> str:
         + gap + "\n"
         "Block B, comprehension of these intake questions (single choice, exactly as written), each "
         "followed by an open end 'In your own words, what is this question asking?':\n" + qs + "\n"
+        "Block C, message test: 'Which message would most make you trust and contact a free "
+        "immigration legal help service?' (rank): " + " | ".join(MESSAGES) + ". "
         "End with: 'Which word or question was confusing, and how would people in your community say it?'. "
         f"Add {language} as a survey language and machine translate. No personal identifiers. "
         "Do not recruit paid respondents. Reply with the survey_id.")
@@ -112,15 +114,20 @@ def calibrate(fp: FlashpointClient, language: str, dry: bool) -> dict:
         "address, notario, deadline, work) give the share who agree with SAY, the share who agree "
         "with BELIEVE, the share answering Yes to DO, and one sentence on the gap. Return Part 1 "
         "as JSON: {\"gap_map\": [{\"topic\":..., \"say_pct\":..., \"believe_pct\":..., "
-        "\"do_pct\":..., \"gap\":...}]}. Part 2, COMPREHENSION: for each intake question, the "
+        "\"do_pct\":..., \"gap\":...}], \"winning_message\": \"<exact English text of the top ranked Block C message>\", "
+        "\"segments\": [{\"name\":..., \"share_pct\":...}]} using the segments misinformed and at risk, "
+        "engaged and resource seeking, fearful but aware, disengaged and isolated. Part 2, COMPREHENSION: for each intake question, the "
         f"misunderstood words and a clearer everyday wording in {language} with an English gloss, "
         "then 5 wording rules for this community. Be concise.",
         conversation_id=conv, survey_id=survey_id)
     plan["notes"] = an.text[:4000]
-    m = re.search(r'\{\s*"gap_map"\s*:\s*\[.*?\]\s*\}', an.text, re.S)
+    m = re.search(r'\{\s*"gap_map"\s*:.*\}', an.text, re.S)
     if m:
         try:
-            plan["gap_map"] = json.loads(m.group(0))["gap_map"]
+            _j = json.loads(m.group(0))
+            plan["gap_map"] = _j.get("gap_map", [])
+            plan["winning_message"] = _j.get("winning_message", "")
+            plan["segments"] = _j.get("segments", [])
         except json.JSONDecodeError:
             pass
     plan["minutes"] = round((time.time() - t0) / 60, 1)
@@ -131,6 +138,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--lang", choices=TEST_LANGUAGES)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--deck", action="store_true",
+                    help="Generate the findings deck (.pptx) with Flashpoint's presentation tool.")
     ap.add_argument("--followup", action="store_true",
                     help="Build the 30 day DO follow up survey (one per language).")
     a = ap.parse_args()
@@ -138,6 +147,30 @@ def main() -> None:
     fp = FlashpointClient()
     if not fp.live and not a.dry_run:
         sys.exit("Add FLASHPOINT_API_KEY or FLASHPOINT_WALLET_PRIVATE_KEY to .env first.")
+    if a.deck:
+        import base64
+        cal = json.loads(OUT.read_text()) if OUT.exists() else {}
+        ctx = json.dumps({l: {k: cal[l].get(k) for k in ("gap_map", "winning_message", "segments", "community")}
+                          for l in cal}, ensure_ascii=False)[:12000]
+        r = fp.call("presentation", {
+            "title": "JARVIS Immigration: Say, Believe, Do",
+            "data_context": ("Hack the Unreachable. Immigration status research for Spanish (Corona), Georgian "
+                             "(Brighton Beach) and Egyptian Arabic (Astoria) speaking communities in NYC. "
+                             "Synthetic panel results: " + ctx),
+            "custom_instructions": ("One slide per community gap map (say vs believe vs do), one slide on the "
+                                    "winning outreach message per language, one on segments, one on how JARVIS "
+                                    "uses this in intake. Dark navy with cyan accents. Cite that data is from "
+                                    "Flashpoint synthetic panels."),
+            "max_slides": 10}, use_cache=False)
+        out = ROOT / "reports" / "flashpoint_findings.pptx"
+        out.parent.mkdir(exist_ok=True)
+        d = r.data if isinstance(r.data, dict) else {}
+        if d.get("pptx_base64"):
+            out.write_bytes(base64.b64decode(d["pptx_base64"]))
+            print("saved", out)
+        else:
+            print(r.text[:800])
+        return
     if a.followup:
         for l in langs:
             r = fp.survey(

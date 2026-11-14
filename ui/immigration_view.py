@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import html
 
-from core.immigration import CONCERNS, FORMS, LOOKUPS, RULES, STAGES, STAGE_INDEX
+from core.immigration import CONCERNS, SEGMENTS, FORMS, LOOKUPS, RULES, STAGES, STAGE_INDEX
 
 
 def esc(x) -> str:
@@ -56,6 +56,9 @@ def render_stage_map(report: dict) -> str:
         for f in report.get("forms", []) if f in FORMS)
     looks = "".join(f'<div class="rule"><a href="{esc(l["url"])}" target="_blank">{esc(l["name"])}</a>'
                     f'<br>{esc(l["note"])}</div>' for l in LOOKUPS)
+    seg = SEGMENTS.get(report.get("segment", ""))
+    seg_html = (f'<div class="alert info"><b>SEGMENT: {esc(seg["label"]).upper()}</b> · '
+                f'How JARVIS adapts: {esc(seg["adapt"])}</div>' if seg else "")
     conc = ""
     for k in report.get("concerns", []):
         c = CONCERNS.get(k)
@@ -73,6 +76,7 @@ def render_stage_map(report: dict) -> str:
 <div class="panel"><div class="ptitle">IMMIGRATION PROCEDURE // WHERE YOU ARE {badge}</div>
 <div class="stepper">{steps}</div>
 <div style="font-size:13px;color:#d8f6ff;margin-bottom:6px">{esc(STAGES[cur]["desc"])}</div>
+{seg_html}
 {mism}{alerts}</div>
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px">
 <div class="panel"><div class="ptitle">RULES &amp; REGULATIONS</div>{rules or '<div class="log">Shown after the survey.</div>'}</div>

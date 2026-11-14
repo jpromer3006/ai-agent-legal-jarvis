@@ -244,6 +244,40 @@ GAP_SURVEY: list[dict] = [
 ]
 
 
+# Outreach message test (Flashpoint Phase 3, run on the synthetic panel).
+# The community's winning message becomes JARVIS's opening line in that language.
+MESSAGES = [
+    "Free legal help. No documents needed to ask a question.",
+    "Your rights, in your language.",
+    "Know your court date before it is too late.",
+    "Nothing you tell JARVIS is shared with immigration enforcement.",
+]
+
+# Segments (Flashpoint Phase 4). JARVIS adapts how it talks, never what the law says.
+SEGMENTS = {
+    "misinformed_at_risk": {"label": "Misinformed and at risk",
+        "adapt": "Explain plainly that notarios are not lawyers; point to the DOJ accredited list first."},
+    "engaged_resource_seeking": {"label": "Engaged and resource seeking",
+        "adapt": "Be direct and detailed; share the official tools and forms for their representative."},
+    "fearful_but_aware": {"label": "Fearful but aware",
+        "adapt": "Lead with rights and safety; explain each step before it happens; keep sentences short."},
+    "disengaged_isolated": {"label": "Disengaged and isolated",
+        "adapt": "Slow down; one question at a time; offer ActionNYC by phone in their language."},
+}
+
+
+def segment_of(ans: dict) -> str:
+    helper, worry = ans.get("helper", -1), ans.get("worry", -1)
+    unsure = sum(1 for k, v in ans.items() if k in ("papers", "filed", "court_date", "decision", "helper") and v == 4)
+    if helper == 2:
+        return "misinformed_at_risk"
+    if helper in (0, 1):
+        return "engaged_resource_seeking"
+    if helper == 3 or unsure >= 2:
+        return "disengaged_isolated" if worry not in (2, 3, 4) else "fearful_but_aware"
+    return "fearful_but_aware" if worry in (2, 3, 4) else "disengaged_isolated"
+
+
 # ---------------------------------------------------------------- survey
 # English is canonical. The app renders each question and option in the
 # person's language through dialect.translate() with Flashpoint calibration.
@@ -287,12 +321,13 @@ class StageReport:
     rules: list[str] = field(default_factory=list)
     mismatches: list[str] = field(default_factory=list)
     concerns: list[str] = field(default_factory=list)
+    segment: str = ""
     verified: bool = False
 
     def as_dict(self) -> dict:
         return {"stage": self.stage, "stage_label": self.stage_label, "alerts": self.alerts,
                 "forms": self.forms, "rules": self.rules, "mismatches": self.mismatches,
-                "concerns": self.concerns, "verified": self.verified}
+                "concerns": self.concerns, "segment": self.segment, "verified": self.verified}
 
 
 def score_survey(ans: dict[str, int], facts_text: str = "") -> StageReport:
@@ -363,6 +398,7 @@ def score_survey(ans: dict[str, int], facts_text: str = "") -> StageReport:
     elif confirm == 1:
         rep.mismatches.append("The person said Jarvis's summary is only partly correct.")
     rep.concerns = detect_concerns(facts_text, g("worry"))
+    rep.segment = segment_of(ans)
     if "detention" in rep.concerns or "family" in rep.concerns:
         rep.alerts.append({"level": "info", "rule": "change_of_address_court",
                            "text": "If a family member is detained, the ICE Online Detainee Locator can find them. Keep the court and USCIS updated on your address."})
