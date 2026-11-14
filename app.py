@@ -30,6 +30,7 @@ from core.lawyer import claude_legal_chat, generate_irac_memo, memo_to_pdf
 from core.procedure import select_procedure, locate_stages
 from ui.procedure_map import render_procedure_map
 from ui.agent_view import render_agent_cards, render_validator_summary
+from ui.voice_agent import language_line, load_agent_config, widget_html
 
 try:
     import anthropic as _anthropic_mod
@@ -912,22 +913,34 @@ with center:
     else:
         # --- Voice mode ON: language dropdown + controls right under hologram ---
         _stt_lang = voice.STT_LANG_CODES.get(st.session_state.voice_lang, "en-US")
+        _agent_cfg = load_agent_config()
 
-        # Language dropdown (prominent, centered)
-        st.markdown("""
-        <div style="text-align:center; margin-bottom:6px;">
-          <span style="font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:.3em;
-            color:#29e6ff;">VOICE LANGUAGE</span>
-        </div>""", unsafe_allow_html=True)
-        _lang_cols = st.columns([1, 2, 1])
-        with _lang_cols[1]:
-            new_lang = st.selectbox(
-                "VOICE LANGUAGE", list(voice.LANGUAGES.keys()),
-                index=list(voice.LANGUAGES.keys()).index(st.session_state.voice_lang),
-                key="voice_lang_select", label_visibility="collapsed")
-            if new_lang != st.session_state.voice_lang:
-                st.session_state.voice_lang = new_lang
-                st.rerun()
+        if _agent_cfg:
+            # ElevenLabs voice agent: listens and speaks, detects the language itself
+            st.markdown(f"""
+            <div style="text-align:center; margin-bottom:6px;">
+              <span style="font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:.3em;
+                color:#29e6ff;">VOICE AGENT · SPEAK IN ANY OF THESE</span><br>
+              <span style="font-size:13px; color:#cfefff;">{esc(language_line(_agent_cfg))}</span>
+            </div>""", unsafe_allow_html=True)
+            st.html(widget_html(_agent_cfg["agent_id"]), unsafe_allow_javascript=True)
+
+        else:
+            # Fallback (no agent configured): language dropdown, prominent, centered
+            st.markdown("""
+            <div style="text-align:center; margin-bottom:6px;">
+              <span style="font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:.3em;
+                color:#29e6ff;">VOICE LANGUAGE</span>
+            </div>""", unsafe_allow_html=True)
+            _lang_cols = st.columns([1, 2, 1])
+            with _lang_cols[1]:
+                new_lang = st.selectbox(
+                    "VOICE LANGUAGE", list(voice.LANGUAGES.keys()),
+                    index=list(voice.LANGUAGES.keys()).index(st.session_state.voice_lang),
+                    key="voice_lang_select", label_visibility="collapsed")
+                if new_lang != st.session_state.voice_lang:
+                    st.session_state.voice_lang = new_lang
+                    st.rerun()
 
         # Buttons row
         v1, v2, v3 = st.columns(3)
@@ -953,20 +966,20 @@ with center:
                     st.session_state.pop(k, None)
                 st.rerun()
 
-        # Auto-listen STT (hands-free, continuous)
-        st.html(_voice_auto_listen_html(_stt_lang))
-
-        # If research just completed and we have a voice summary, speak that instead
+        # Legacy browser listening + ElevenLabs read-aloud, only when no agent is configured
+        # (the voice agent above handles both listening and speaking itself)
         _vsummary = st.session_state.pop("voice_summary", None)
-        if _vsummary:
-            _jarvis_speak(_vsummary)
-        else:
-            # Auto-speak latest Jarvis message (only once per message+language)
-            _last_j = next((m["text"] for m in reversed(case.transcript) if m["role"] == "jarvis"), None)
-            _spoken_key = f"_vspoken_{len(case.transcript)}_{st.session_state.voice_lang}"
-            if _last_j and _spoken_key not in st.session_state:
-                _jarvis_speak(_last_j)
-                st.session_state[_spoken_key] = True
+        if not _agent_cfg:
+            st.html(_voice_auto_listen_html(_stt_lang))
+            if _vsummary:
+                _jarvis_speak(_vsummary)
+            else:
+                # Auto-speak latest Jarvis message (only once per message+language)
+                _last_j = next((m["text"] for m in reversed(case.transcript) if m["role"] == "jarvis"), None)
+                _spoken_key = f"_vspoken_{len(case.transcript)}_{st.session_state.voice_lang}"
+                if _last_j and _spoken_key not in st.session_state:
+                    _jarvis_speak(_last_j)
+                    st.session_state[_spoken_key] = True
 
 # ------------------------------------------------------------------ RIGHT: sources + log
 with right:

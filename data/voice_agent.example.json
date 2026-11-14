@@ -1,0 +1,6 @@
+{
+  "agent_id": "agent_REPLACE_WITH_YOUR_AGENT_ID",
+  "name": "JARVIS Legal Voice",
+  "languages": ["en", "es", "zh", "hi", "ru", "ka", "ar"],
+  "_note": "Created automatically by: python tools/create_voice_agent.py  (saved as data/voice_agent.json, which is not uploaded)"
+}

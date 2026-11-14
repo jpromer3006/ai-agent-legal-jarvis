@@ -18,6 +18,17 @@ A JARVIS icon appears on your Desktop. Click it from then on. The first launch b
 
 Copy `.env.example` to `.env` and add your Anthropic API key. Without a key, JARVIS runs in OFFLINE DEMO mode: the full interface works, classification uses the keyword baseline, and research shows labeled sample findings.
 
+## Turn on the multilingual voice agent (ElevenLabs)
+
+Voice mode can use an ElevenLabs voice agent that listens and speaks in English, Spanish, Mandarin, Hindi, Russian, Georgian and Egyptian Arabic. It detects the caller's language automatically and follows the same legal information guardrail.
+
+1. Create an ElevenLabs API key with: Text to Speech, Speech to Text, ElevenAgents (Write), Voices (Read).
+2. Add it to `.env` as `ELEVENLABS_API_KEY=...`
+3. Run `python tools/create_voice_agent.py` once. It creates the agent in your ElevenLabs account and saves its id to `data/voice_agent.json` (kept out of git; see `data/voice_agent.example.json`). Run it again any time to update the agent.
+4. Start the app, click JARVIS VOICE, then "Start a call".
+
+Without `data/voice_agent.json`, voice mode falls back to the original browser listening + read-aloud feature. Calls use ElevenLabs credits; the agent is capped at 50 calls a day and 10 minutes per call. Before putting the app online, add your site to the agent's allowlist in ElevenLabs.
+
 ## How it is built
 
     app.py                 HUD interface (Streamlit + custom CSS + animated SVG reactor)
