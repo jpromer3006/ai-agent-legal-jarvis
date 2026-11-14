@@ -70,6 +70,24 @@ LAW_AREAS: dict[str, dict] = {
         "icon": "TRF",
         "keywords": ["ticket", "license suspended", "dmv", "speeding", "parking"],
     },
+    "Veterans Benefits": {
+        "icon": "VET",
+        "keywords": ["veteran", "va ", "va hospital", "va disability", "va claim",
+                     "service connected", "gi bill", "military discharge",
+                     "board of veterans", "dd-214", "ptsd claim"],
+    },
+    "Unemployment": {
+        "icon": "UMP",
+        "keywords": ["unemployment", "unemployment insurance", "ui benefits",
+                     "denied unemployment", "unemployment appeal", "department of labor",
+                     "laid off", "furlough"],
+    },
+    "Government Benefits": {
+        "icon": "GOV",
+        "keywords": ["medicaid", "medicare", "snap", "food stamps", "ssi ", "ssdi",
+                     "social security disability", "public assistance", "welfare",
+                     "disability benefits", "tanf"],
+    },
 }
 
 

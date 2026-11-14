@@ -1,0 +1,363 @@
+{
+  "_meta": {
+    "description": "New York courts, agencies, and federal forums for JARVIS triage routing.",
+    "needs_verification": true,
+    "reviewed_by": null,
+    "note": "Every entry needs verification against current official sources before use."
+  },
+  "courts": [
+    {
+      "id": "ny-supreme",
+      "name": "New York Supreme Court",
+      "jurisdiction": "state",
+      "county_matters": true,
+      "description": "General jurisdiction trial court. Handles civil cases above lower court limits, matrimonial actions, and Article 78 proceedings against government agencies.",
+      "url": "https://www.nycourts.gov/courts/supreme.shtml",
+      "areas": ["Torts / Personal Injury", "Contracts / Business", "Civil Rights", "Employment"],
+      "needs_verification": true
+    },
+    {
+      "id": "nyc-civil",
+      "name": "New York City Civil Court",
+      "jurisdiction": "nyc",
+      "county_matters": true,
+      "description": "Handles civil cases in NYC with claims up to $50,000. Includes a Housing Part and a Small Claims Part.",
+      "url": "https://www.nycourts.gov/courts/nyc/civil/",
+      "areas": ["Torts / Personal Injury", "Consumer / Debt", "Contracts / Business"],
+      "notes": "Only exists in NYC. Outside NYC, equivalent is City Court or District Court.",
+      "needs_verification": true
+    },
+    {
+      "id": "nyc-housing",
+      "name": "New York City Housing Court",
+      "jurisdiction": "nyc",
+      "county_matters": true,
+      "description": "Part of NYC Civil Court. Handles landlord-tenant disputes including evictions, repairs, and housing code violations in NYC.",
+      "url": "https://www.nycourts.gov/courts/nyc/housing/",
+      "areas": ["Housing / Landlord Tenant"],
+      "notes": "Outside NYC, landlord-tenant cases go to City Court, District Court, Town Court, or Village Court.",
+      "needs_verification": true
+    },
+    {
+      "id": "nyc-small-claims",
+      "name": "Small Claims Court (NYC)",
+      "jurisdiction": "nyc",
+      "county_matters": true,
+      "description": "Part of NYC Civil Court. Claims up to $10,000 for individuals, $5,000 for businesses. Informal procedures, no lawyer needed.",
+      "url": "https://www.nycourts.gov/courts/nyc/smallclaims/",
+      "areas": ["Consumer / Debt", "Contracts / Business", "Torts / Personal Injury"],
+      "notes": "Outside NYC, small claims are part of City Court, District Court, Town Court, or Village Court. Limits may differ.",
+      "needs_verification": true
+    },
+    {
+      "id": "ny-family",
+      "name": "Family Court",
+      "jurisdiction": "state",
+      "county_matters": true,
+      "description": "Handles custody, visitation, child and spousal support, family offense (orders of protection), paternity, adoption, guardianship, foster care, juvenile delinquency, and PINS. Does NOT handle divorce (that is Supreme Court).",
+      "url": "https://www.nycourts.gov/courts/family/",
+      "areas": ["Family"],
+      "notes": "Divorce and annulment must be filed in Supreme Court. Family Court handles almost everything else family-related.",
+      "needs_verification": true
+    },
+    {
+      "id": "ny-surrogate",
+      "name": "Surrogate's Court",
+      "jurisdiction": "state",
+      "county_matters": true,
+      "description": "Handles probate of wills, estate administration, guardianship of property, and trust matters. One per county.",
+      "url": "https://www.nycourts.gov/courts/surrogate.shtml",
+      "areas": ["Estates / Probate"],
+      "needs_verification": true
+    },
+    {
+      "id": "nyc-criminal",
+      "name": "New York City Criminal Court",
+      "jurisdiction": "nyc",
+      "county_matters": true,
+      "description": "Handles misdemeanors and violations in NYC. Felonies are arraigned here but tried in Supreme Court.",
+      "url": "https://www.nycourts.gov/courts/nyc/criminal/",
+      "areas": ["Criminal"],
+      "notes": "Outside NYC, criminal cases go to County Court (felonies), City Court, District Court, Town Court, or Village Court.",
+      "needs_verification": true
+    },
+    {
+      "id": "ny-county-court",
+      "name": "County Court",
+      "jurisdiction": "state_outside_nyc",
+      "county_matters": true,
+      "description": "Outside NYC: handles felony criminal cases, civil cases over lower court limits, and some appeals from lower courts. One per county (57 counties outside NYC).",
+      "url": "https://www.nycourts.gov/courts/county.shtml",
+      "areas": ["Criminal", "Torts / Personal Injury", "Contracts / Business"],
+      "notes": "Does not exist in NYC. NYC equivalent for felonies is Supreme Court.",
+      "needs_verification": true
+    },
+    {
+      "id": "ny-district-court",
+      "name": "District Court",
+      "jurisdiction": "nassau_suffolk",
+      "county_matters": true,
+      "description": "Exists only in Nassau County and western Suffolk County. Handles civil cases up to $15,000, small claims up to $5,000, misdemeanors, and landlord-tenant.",
+      "url": "https://www.nycourts.gov/courts/district.shtml",
+      "areas": ["Torts / Personal Injury", "Housing / Landlord Tenant", "Criminal", "Consumer / Debt"],
+      "needs_verification": true
+    },
+    {
+      "id": "ny-city-court",
+      "name": "City Court",
+      "jurisdiction": "state_outside_nyc",
+      "county_matters": true,
+      "description": "In cities outside NYC (61 cities). Handles civil up to $15,000, small claims up to $5,000, misdemeanors, violations, and some landlord-tenant. Comparable to NYC Civil Court.",
+      "url": "https://www.nycourts.gov/courts/city.shtml",
+      "areas": ["Torts / Personal Injury", "Housing / Landlord Tenant", "Criminal", "Consumer / Debt"],
+      "needs_verification": true
+    },
+    {
+      "id": "ny-town-village-court",
+      "name": "Town and Village Justice Court",
+      "jurisdiction": "state_outside_nyc",
+      "county_matters": true,
+      "description": "Nearly 1,300 courts across NYS outside cities. Handle vehicle and traffic offenses, small claims up to $3,000, misdemeanors, violations, and some civil matters. Often the first court a person encounters outside urban areas.",
+      "url": "https://www.nycourts.gov/courts/townandvillage/",
+      "areas": ["Traffic / Vehicle", "Criminal"],
+      "needs_verification": true
+    },
+    {
+      "id": "ny-court-of-claims",
+      "name": "Court of Claims",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Hears claims for money damages against the State of New York. Claims against the state cannot be brought in other courts.",
+      "url": "https://www.nycourts.gov/courts/claims.shtml",
+      "areas": ["Torts / Personal Injury", "Civil Rights", "Employment"],
+      "needs_verification": true
+    }
+  ],
+  "agencies": [
+    {
+      "id": "ny-wcb",
+      "name": "New York State Workers' Compensation Board",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Adjudicates workers' compensation claims. District offices across NYS. Employer must be notified within 30 days; claim filed within 2 years of injury.",
+      "url": "https://www.wcb.ny.gov/",
+      "areas": ["Workers Compensation"],
+      "notes": "Not a court. Administrative agency with its own hearing process. No county choice — assigned by district.",
+      "needs_verification": true
+    },
+    {
+      "id": "ny-dol",
+      "name": "New York State Department of Labor",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Administers unemployment insurance benefits. Initial claims filed online or by phone. Also handles wage theft complaints.",
+      "url": "https://dol.ny.gov/",
+      "areas": ["Unemployment", "Employment"],
+      "needs_verification": true
+    },
+    {
+      "id": "ny-ui-appeal-board",
+      "name": "Unemployment Insurance Appeal Board",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Hears appeals from ALJ decisions on unemployment insurance claims. First appeal goes to an Administrative Law Judge; second appeal to this Board.",
+      "url": "https://dol.ny.gov/unemployment-insurance-appeal-board",
+      "areas": ["Unemployment"],
+      "needs_verification": true
+    },
+    {
+      "id": "ny-dhr",
+      "name": "New York State Division of Human Rights",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Investigates and adjudicates discrimination complaints under the NY Human Rights Law. Covers employment, housing, public accommodations, and credit discrimination.",
+      "url": "https://dhr.ny.gov/",
+      "areas": ["Employment", "Housing / Landlord Tenant", "Civil Rights"],
+      "needs_verification": true
+    },
+    {
+      "id": "nyc-cchr",
+      "name": "NYC Commission on Human Rights",
+      "jurisdiction": "nyc",
+      "county_matters": false,
+      "description": "Enforces NYC Human Rights Law. Handles discrimination in employment, housing, and public accommodations within NYC. Often broader protections than state or federal law.",
+      "url": "https://www.nyc.gov/site/cchr/index.page",
+      "areas": ["Employment", "Housing / Landlord Tenant", "Civil Rights"],
+      "needs_verification": true
+    },
+    {
+      "id": "nyc-comptroller",
+      "name": "NYC Comptroller's Office — Claims Division",
+      "jurisdiction": "nyc",
+      "county_matters": false,
+      "description": "Receives Notice of Claim filings against New York City agencies. Required within 90 days of incident for tort claims against the city.",
+      "url": "https://comptroller.nyc.gov/services/for-the-public/claims/filing-a-claim/",
+      "areas": ["Torts / Personal Injury"],
+      "needs_verification": true
+    },
+    {
+      "id": "va",
+      "name": "U.S. Department of Veterans Affairs",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Administers veterans benefits including disability compensation, pension, education (GI Bill), and healthcare. Initial claims filed with VA regional offices.",
+      "url": "https://www.va.gov/",
+      "areas": ["Veterans Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "bva",
+      "name": "Board of Veterans' Appeals",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Hears appeals of VA benefit decisions. Veterans can request a direct review, submit new evidence, or request a hearing.",
+      "url": "https://www.bva.va.gov/",
+      "areas": ["Veterans Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "cavc",
+      "name": "U.S. Court of Appeals for Veterans Claims",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Federal court that reviews BVA decisions. Must file within 120 days of BVA decision.",
+      "url": "https://www.uscourts.cavc.gov/",
+      "areas": ["Veterans Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "uscis",
+      "name": "U.S. Citizenship and Immigration Services",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Processes immigration and naturalization applications. Handles asylum applications (affirmative), work permits, green cards, citizenship.",
+      "url": "https://www.uscis.gov/",
+      "areas": ["Immigration"],
+      "needs_verification": true
+    },
+    {
+      "id": "eoir",
+      "name": "Executive Office for Immigration Review (Immigration Court)",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Immigration courts that hear removal (deportation) proceedings and asylum cases (defensive). Part of DOJ, not the judicial branch.",
+      "url": "https://www.justice.gov/eoir",
+      "areas": ["Immigration"],
+      "notes": "NY immigration courts: 26 Federal Plaza (NYC), Varick St (NYC), Batavia (Western NY).",
+      "needs_verification": true
+    },
+    {
+      "id": "bia",
+      "name": "Board of Immigration Appeals",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Appellate body for immigration court decisions. Must appeal within 30 days of immigration judge decision.",
+      "url": "https://www.justice.gov/eoir/board-of-immigration-appeals",
+      "areas": ["Immigration"],
+      "needs_verification": true
+    },
+    {
+      "id": "ssa",
+      "name": "Social Security Administration",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Administers Social Security retirement, SSI, and SSDI benefits. Disability claims go through initial review, reconsideration, ALJ hearing, Appeals Council, then federal court.",
+      "url": "https://www.ssa.gov/",
+      "areas": ["Government Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "ny-otda",
+      "name": "NYS Office of Temporary and Disability Assistance",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Oversees public assistance (TANF/welfare), SNAP (food stamps), and Medicaid eligibility. Fair hearings available for denials or reductions.",
+      "url": "https://otda.ny.gov/",
+      "areas": ["Government Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "eeoc",
+      "name": "Equal Employment Opportunity Commission",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Handles federal employment discrimination charges (Title VII, ADA, ADEA). Must file before suing in federal court. NY district office at 33 Whitehall Street, NYC.",
+      "url": "https://www.eeoc.gov/",
+      "areas": ["Employment", "Civil Rights"],
+      "needs_verification": true
+    },
+    {
+      "id": "ny-ag",
+      "name": "New York State Attorney General — Consumer Frauds Bureau",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Investigates consumer fraud, scams, and deceptive business practices. Takes complaints but does not represent individuals.",
+      "url": "https://ag.ny.gov/consumer-frauds-bureau",
+      "areas": ["Consumer / Debt"],
+      "needs_verification": true
+    },
+    {
+      "id": "dmv",
+      "name": "New York State DMV",
+      "jurisdiction": "state",
+      "county_matters": false,
+      "description": "Handles license suspensions, revocations, and administrative hearings for traffic offenses. Also handles no-fault insurance disputes.",
+      "url": "https://dmv.ny.gov/",
+      "areas": ["Traffic / Vehicle"],
+      "needs_verification": true
+    },
+    {
+      "id": "tvb",
+      "name": "Traffic Violations Bureau (NYC)",
+      "jurisdiction": "nyc",
+      "county_matters": false,
+      "description": "Handles most moving traffic violations in NYC. Not a court — an administrative tribunal under DMV. No right to jury trial.",
+      "url": "https://www.nyc.gov/site/finance/vehicles/services-traffic-702.page",
+      "areas": ["Traffic / Vehicle"],
+      "notes": "Only in NYC. Outside NYC, traffic tickets go to Town/Village Justice Courts.",
+      "needs_verification": true
+    }
+  ],
+  "federal_courts": [
+    {
+      "id": "sdny",
+      "name": "U.S. District Court — Southern District of New York",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Federal trial court for Manhattan, Bronx, Westchester, Rockland, Putnam, Orange, Dutchess, Sullivan. Handles federal question cases, diversity cases over $75,000, immigration appeals, civil rights under 42 USC 1983, and Social Security appeals.",
+      "url": "https://www.nysd.uscourts.gov/",
+      "areas": ["Civil Rights", "Immigration", "Government Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "edny",
+      "name": "U.S. District Court — Eastern District of New York",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Federal trial court for Brooklyn, Queens, Staten Island, Nassau, Suffolk. Same jurisdiction as SDNY for different counties.",
+      "url": "https://www.nyed.uscourts.gov/",
+      "areas": ["Civil Rights", "Immigration", "Government Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "ndny",
+      "name": "U.S. District Court — Northern District of New York",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Federal trial court covering upstate NY from Albany to the Canadian border.",
+      "url": "https://www.nynd.uscourts.gov/",
+      "areas": ["Civil Rights", "Immigration", "Government Benefits"],
+      "needs_verification": true
+    },
+    {
+      "id": "wdny",
+      "name": "U.S. District Court — Western District of New York",
+      "jurisdiction": "federal",
+      "county_matters": false,
+      "description": "Federal trial court for Buffalo, Rochester, and surrounding western NY counties.",
+      "url": "https://www.nywd.uscourts.gov/",
+      "areas": ["Civil Rights", "Immigration", "Government Benefits"],
+      "needs_verification": true
+    }
+  ]
+}
