@@ -2,7 +2,7 @@
 
 English is the main language. Spanish, Georgian and Egyptian Arabic are the
 test languages. Turbo v2.5 speaks English, Spanish and Arabic; Georgian uses
-Eleven v3, and if that model is unavailable on the account Jarvis shows the
+Eleven v3, and if that model is unavailable on the account ViaNova shows the
 Georgian text on screen instead of speaking it.
 """
 from __future__ import annotations
@@ -19,10 +19,10 @@ try:
 except ImportError:
     ElevenLabs = None
 
-logger = logging.getLogger("jarvis.voice")
+logger = logging.getLogger("vianova.voice")
 
-# George: British, warm. The JARVIS persona across every language.
-DEFAULT_VOICE_ID = os.getenv("JARVIS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
+# George: British, warm. The ViaNova persona across every language.
+DEFAULT_VOICE_ID = os.getenv("ViaNova_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
 MODEL_ID = "eleven_turbo_v2_5"
 
 # Backward compatible maps used by app.py
@@ -65,8 +65,47 @@ def speak_b64(text: str, voice_id: str | None = None, language: str = "English")
     return "data:audio/mpeg;base64," + base64.b64encode(audio).decode()
 
 
+_audio_counter = 0
+
+
 def autoplay_audio_html(audio_b64: str) -> str:
+    """Inject an audio element that plays after the user has interacted with the page.
+
+    Chrome blocks autoplay until a user gesture occurs.  This function queues
+    audio to window._vianovaAudioQueue if the gesture flag is not yet set, and
+    drains the queue as soon as audio_enable_js() is injected (which happens
+    right after the consent button click).
+    """
+    global _audio_counter
+    _audio_counter += 1
+    aid = f"vianova-audio-{_audio_counter}"
     return f"""
-    <audio autoplay>
-      <source src="{audio_b64}" type="audio/mpeg">
-    </audio>"""
+<audio id="{aid}" src="{audio_b64}" type="audio/mpeg" style="display:none"></audio>
+<script>
+(function(){{
+  var audio = document.getElementById('{aid}');
+  if (!audio) return;
+  if (window._vianovaAudioEnabled) {{
+    audio.play().catch(function(){{}});
+  }} else {{
+    window._vianovaAudioQueue = window._vianovaAudioQueue || [];
+    window._vianovaAudioQueue.push(audio);
+  }}
+}})();
+</script>"""
+
+
+def audio_enable_js() -> str:
+    """Return a one-time <script> that enables autoplay and drains the queue.
+
+    Inject this immediately after the first user gesture (consent button click).
+    """
+    return """
+<script>
+(function(){
+  window._vianovaAudioEnabled = true;
+  var q = window._vianovaAudioQueue || [];
+  window._vianovaAudioQueue = [];
+  q.forEach(function(a){ a.play().catch(function(){}); });
+})();
+</script>"""

@@ -1,4 +1,4 @@
-"""JARVIS Immigration: voice first immigration legal information (Streamlit).
+"""ViaNova Immigration: voice first immigration legal information (Streamlit).
 
 English is the main language; Spanish, Georgian and Egyptian Arabic are the
 test languages. Flashpoint.AI supplies the community lens and the calibrated
@@ -42,6 +42,7 @@ from core import dialect
 from core.languages import LANGUAGES, TEST_LANGUAGES, lang as lang_spec
 from core.flashpoint import FlashpointClient
 from core.immigration import SURVEY, score_survey, GAP_SURVEY, SERVICE_SURVEY, service_profile
+from core.fp_survey import FP_QUESTIONS, run_fp_survey, FPResult
 from core import workflow as wfm
 from ui.workflow_view import render_tracker, render_events
 import json as _json
@@ -51,10 +52,10 @@ try:
 except ImportError:
     _anthropic_mod = None
 
-st.set_page_config(page_title="JARVIS Immigration", page_icon="⚖️", layout="wide",
+st.set_page_config(page_title="ViaNova Immigration", page_icon="⚖️", layout="wide",
                    initial_sidebar_state="collapsed")
 
-USER = os.getenv("JARVIS_USER", "GUEST")
+USER = os.getenv("ViaNova_USER", "GUEST")
 
 # ------------------------------------------------------------------ state
 if "case" not in st.session_state:
@@ -72,6 +73,11 @@ if "case" not in st.session_state:
     st.session_state.fp = FlashpointClient()
     st.session_state.fp_lens = None
     st.session_state.survey_open = False
+    # Flashpoint pre-survey state
+    st.session_state.fp_survey_done = False
+    st.session_state.fp_result = None
+    st.session_state.fp_survey_step = 0
+    st.session_state.fp_answers = {}
 case: CaseFile = st.session_state.case
 orch: Orchestrator = st.session_state.orch
 fp: FlashpointClient = st.session_state.setdefault("fp", FlashpointClient())
@@ -107,8 +113,8 @@ def _local(text_en: str) -> str:
 
 
 def _ask(text_en: str) -> None:
-    """Jarvis says something: English is canonical, the person sees their language."""
-    case.transcript.append({"role": "jarvis", "text": text_en, "text_local": _local(text_en),
+    """ViaNova says something: English is canonical, the person sees their language."""
+    case.transcript.append({"role": "vianova", "text": text_en, "text_local": _local(text_en),
                             "lang": case.language})
 
 # ------------------------------------------------------------------ theme
@@ -256,11 +262,11 @@ if not st.session_state.consent_given:
 <div style="max-width:720px; margin:80px auto; text-align:center;">
   <div style="font-family:'Orbitron',sans-serif; font-size:28px; letter-spacing:.3em;
     color:#29e6ff; text-shadow:0 0 20px rgba(41,230,255,.7); margin-bottom:30px;">
-    J.A.R.V.I.S.</div>
+    ViaNova</div>
   <div style="font-size:20px; line-height:2; color:#e9fbff; text-shadow:0 0 6px rgba(41,230,255,.3);">
     This is an <b style="color:#29e6ff;">educational prototype</b> for general legal information only.<br>
     It is <b style="color:#ff4d6d;">not</b> legal advice and does not replace a licensed attorney.<br>
-    JARVIS never asks for an A-number, SSN, or passport number, and never shares your story.<br>
+    ViaNova never asks for an A-number, SSN, or passport number, and never shares your story.<br>
     Only an anonymous community description (language + neighborhood) is sent to Flashpoint.AI.<br>
     Any deadline shown is an estimate — confirm with a lawyer or legal aid.<br>
     Do not rely on this tool for a real claim.<br>
@@ -269,12 +275,107 @@ if not st.session_state.consent_given:
 </div>""", unsafe_allow_html=True)
     if st.button("I UNDERSTAND — BEGIN INTAKE"):
         st.session_state.consent_given = True
+        # Enable audio autoplay now that a user gesture has occurred
+        st.markdown(voice.audio_enable_js(), unsafe_allow_html=True)
         st.rerun()
     st.stop()
 
 
+
+
+# ================================================================== FLASHPOINT PRE-SURVEY PHASE
+def _render_fp_survey_phase() -> None:
+    """Render the Flashpoint truth-seeking pre-survey (5 questions)."""
+    step: int = st.session_state.fp_survey_step
+    answers: dict = st.session_state.fp_answers
+    total = len(FP_QUESTIONS)
+
+    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(f"""
+<div style="max-width:760px; margin:40px auto;">
+  <div style="font-family:'Orbitron',sans-serif; font-size:20px; letter-spacing:.3em;
+    color:#29e6ff; text-shadow:0 0 14px rgba(41,230,255,.7); margin-bottom:6px;">
+    ViaNova</div>
+  <div style="font-size:11px; letter-spacing:.3em; color:#5f8ea3; margin-bottom:24px;">
+    FLASHPOINT PRE-SURVEY — QUESTION {min(step + 1, total)} OF {total}</div>
+  <div style="background:rgba(41,230,255,.06); border:1px solid rgba(41,230,255,.25);
+    border-radius:4px; height:6px; margin-bottom:20px;">
+    <div style="background:#29e6ff; height:100%; width:{int((step / total) * 100)}%;
+      border-radius:4px; box-shadow:0 0 10px #29e6ff;"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    if step < total:
+        q = FP_QUESTIONS[step]
+        q_text = _local(q["text_en"]) if case.language != "English" else q["text_en"]
+        st.markdown(f"""
+<div style="max-width:760px; margin:0 auto 20px;">
+  <div class="panel">
+    <div class="ptitle">FLASHPOINT.AI // COMMUNITY TRUTH SURVEY</div>
+    <div class="question">{esc(q_text)}</div>
+    <div style="font-size:11px; color:#5f8ea3; margin-top:8px; letter-spacing:.1em;">
+      Your answers are scored by Flashpoint to help identify topics that need
+      human follow-up. No names or case details are shared — only community-level patterns.
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        # Speak the question
+        _spk_key = f"_fp_spoken_{step}"
+        if _spk_key not in st.session_state:
+            audio_b64 = voice.speak_b64(q_text, language=case.language)
+            if audio_b64:
+                st.markdown(voice.autoplay_audio_html(audio_b64), unsafe_allow_html=True)
+            st.session_state[_spk_key] = True
+
+        with st.form(key=f"fp_q_{step}"):
+            user_ans = st.text_area(
+                "Your answer",
+                placeholder="Type your answer, or say 'skip' if you prefer not to answer.",
+                label_visibility="collapsed", height=100)
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                submitted = st.form_submit_button(
+                    "NEXT →" if step < total - 1 else "FINISH SURVEY",
+                    use_container_width=True)
+            with col2:
+                skipped = st.form_submit_button("SKIP", use_container_width=True)
+
+        if submitted or skipped:
+            answers[q["id"]] = user_ans.strip() if submitted else "skip"
+            st.session_state.fp_answers = answers
+            st.session_state.fp_survey_step = step + 1
+            st.rerun()
+    else:
+        # All questions answered — run Flashpoint scoring
+        with st.spinner("ViaNova — Flashpoint analysing your answers..."):
+            community = (lang_spec(case.language).get("community") or {}).get(
+                "label", "unspecified community")
+            result: FPResult = run_fp_survey(
+                fp=st.session_state.fp,
+                answers=answers,
+                language=case.language,
+                community=community,
+            )
+        st.session_state.fp_result = result
+        st.session_state.fp_survey_done = True
+
+        # Log probe list as an event in the workflow
+        if result.probe_list:
+            probe_text = " | ".join(result.probe_list[:5])
+            wfm.log_event(case.workflow, "Flashpoint", f"Probe list: {probe_text}")
+
+        st.rerun()
+
+
+# ================================================================== FP SURVEY GATE
+if not st.session_state.get("fp_survey_done", False):
+    _render_fp_survey_phase()
+    st.stop()
+
+
 # ================================================================== VOICE MODE (overlay on dashboard)
-def _jarvis_speak(text: str, already_local: bool = False) -> None:
+def _vianova_speak(text: str, already_local: bool = False) -> None:
     """Speak text via ElevenLabs and auto-play in browser.
 
     If a non-English language is selected, translates before speaking so the
@@ -288,12 +389,35 @@ def _jarvis_speak(text: str, already_local: bool = False) -> None:
         st.markdown(voice.autoplay_audio_html(audio_b64), unsafe_allow_html=True)
 
 
+_LANG_TRIGGERS: dict[str, list[str]] = {
+    "Spanish":        ["en español", "en espanol", "spanish", "habla español", "habla espanol",
+                       "en castellano", "en español por favor"],
+    "Georgian":       ["georgian", "kartuli", "ქართულად", "in georgian"],
+    "Egyptian Arabic":["arabic", "عربي", "بالعربي", "in arabic", "al arabi"],
+    "English":        ["in english", "english please", "back to english", "en inglés",
+                       "en ingles", "switch to english"],
+}
+
+
+def _detect_language_switch(text: str) -> str | None:
+    """Return a language name if the text is a verbal language-switch request."""
+    t = text.lower().strip()
+    for lang_name, triggers in _LANG_TRIGGERS.items():
+        if any(tr in t for tr in triggers):
+            return lang_name
+    return None
+
+
 def _claude_chat(messages: list[dict], system: str = "") -> str:
     """Send messages to Claude and return the assistant response text."""
-    key = os.getenv("ANTHROPIC_API_KEY")
+    key = os.getenv("FLASHPOINT_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
     if not key or _anthropic_mod is None:
-        return "Claude API is not available. Please set ANTHROPIC_API_KEY."
-    client = _anthropic_mod.Anthropic(api_key=key)
+        return "Claude API is not available. Please set FLASHPOINT_API_KEY or ANTHROPIC_API_KEY."
+    base_url = os.getenv("FLASHPOINT_BASE_URL") if os.getenv("FLASHPOINT_API_KEY") else None
+    kwargs: dict = {"api_key": key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    client = _anthropic_mod.Anthropic(**kwargs)
     resp = client.messages.create(
         model=MODEL, max_tokens=2000, system=system or GUARDRAIL,
         messages=messages,
@@ -340,7 +464,7 @@ def _build_action_items() -> list[str]:
 def _voice_auto_listen_html(lang_code: str) -> str:
     """Continuous hands-free STT. Auto-starts, auto-submits to Streamlit chat input."""
     return f"""
-<div id="jarvis-stt" style="text-align:center; padding:4px 0;">
+<div id="vianova-stt" style="text-align:center; padding:4px 0;">
   <div id="stt-indicator" style="display:inline-flex; align-items:center; gap:8px;
     border:1px solid rgba(41,230,255,.4); padding:6px 16px; border-radius:3px;
     background:rgba(41,230,255,.06);">
@@ -373,20 +497,24 @@ def _voice_auto_listen_html(lang_code: str) -> str:
   let restartTimer = null;
 
   function submitText(text) {{
-    // Find Streamlit's chat textarea and submit
-    const frame = window.parent.document;
+    // Always re-query — Streamlit rerenders replace the DOM node
+    const frame = window.parent ? window.parent.document : document;
     const ta = frame.querySelector('textarea[data-testid="stChatInputTextArea"]');
-    if (!ta) return;
-    const nativeSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype, 'value').set;
+    if (!ta) {{ console.warn("ViaNova STT: textarea not found"); return; }}
+    // Use the prototype from the parent frame so React's fiber sees the event
+    const proto = window.parent ? window.parent.HTMLTextAreaElement.prototype
+                                : window.HTMLTextAreaElement.prototype;
+    const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
     nativeSetter.call(ta, text);
     ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
-    // Simulate Enter key to submit
+    ta.dispatchEvent(new Event('change', {{ bubbles: true }}));
+    // Simulate Enter key to submit (120 ms gives React time to process the value)
     setTimeout(() => {{
       ta.dispatchEvent(new KeyboardEvent('keydown', {{
-        key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
+        key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+        bubbles: true, cancelable: true
       }}));
-    }}, 100);
+    }}, 120);
   }}
 
   function startListening() {{
@@ -495,7 +623,7 @@ def _lawyer_mode_ui():
 <div class="lawyer-title">LAWYER MODE — HANDOFF CONSENT</div>
 <div style="font-size:14px; color:#f5e6c8; line-height:1.7;">
 This will transfer the case facts, research findings, and sources<br>
-from the JARVIS intake into Lawyer Mode for attorney review.<br><br>
+from the ViaNova intake into Lawyer Mode for attorney review.<br><br>
 This is an <b style="color:#ffd700;">educational demo</b>. No attorney-client<br>
 relationship is created by using this tool.<br><br>
 <span style="color:#ffb347;">By continuing you consent to this transfer.</span>
@@ -508,7 +636,7 @@ relationship is created by using this tool.<br><br>
                 "text": f"Lawyer Mode handoff consent given at {time.strftime('%H:%M:%S')}"})
             case.save()
             st.rerun()
-        if st.button("CANCEL — BACK TO JARVIS", key="lawyer_cancel"):
+        if st.button("CANCEL — BACK TO ViaNova", key="lawyer_cancel"):
             st.session_state.lawyer_mode = False
             st.rerun()
         return
@@ -527,7 +655,7 @@ LAWYER MODE<small>CLAUDE LEGAL · IRAC MEMORANDUM</small></div>
     # Controls
     lc1, lc2, lc3 = st.columns([1, 1, 1])
     with lc1:
-        if st.button("BACK TO JARVIS"):
+        if st.button("BACK TO ViaNova"):
             st.session_state.lawyer_mode = False
             st.rerun()
     with lc2:
@@ -544,7 +672,7 @@ LAWYER MODE<small>CLAUDE LEGAL · IRAC MEMORANDUM</small></div>
     if case.facts:
         st.markdown(f"""
         <div class="lawyer-panel">
-          <div class="lawyer-title">CASE SUMMARY (SERVICE PLAN FIRST) — TRANSFERRED FROM JARVIS</div>
+          <div class="lawyer-title">CASE SUMMARY (SERVICE PLAN FIRST) — TRANSFERRED FROM ViaNova</div>
           <div class="lawyer-body">{esc(case.summary_text())}</div>
         </div>""", unsafe_allow_html=True)
 
@@ -707,12 +835,12 @@ LAWYER MODE<small>CLAUDE LEGAL · IRAC MEMORANDUM</small></div>
 
 # ------------------------------------------------------------------ boot
 if not st.session_state.booted:
-    orch._log("JARVIS", "systems online" + ("" if orch.online else " in offline demo mode (no API key)"))
-    orch._log("JARVIS", "voice module online (ElevenLabs TTS)")
+    orch._log("ViaNova", "systems online" + ("" if orch.online else " in offline demo mode (no API key)"))
+    orch._log("ViaNova", "voice module online (ElevenLabs TTS)")
     st.session_state.booted = True
     slot, q = case.next_question()
     case.pending_slot = slot
-    _ask("Good day. I'm JARVIS. I help people understand where they are in the immigration "
+    _ask("Good day. I'm ViaNova. I help people understand where they are in the immigration "
          "process, the rules that apply, and the official forms. This is information, not legal advice. " + q)
 
 # ================================================================== STEP 1: SERVICE NEEDS SURVEY (first process)
@@ -720,7 +848,7 @@ if not case.service_profile:
     st.markdown(IMM_CSS, unsafe_allow_html=True)
     st.markdown("""
 <div style="text-align:center;margin:18px 0 6px;font-family:'Orbitron',sans-serif;font-size:22px;
-  letter-spacing:.3em;color:#29e6ff;text-shadow:0 0 18px rgba(41,230,255,.6)">J.A.R.V.I.S.</div>
+  letter-spacing:.3em;color:#29e6ff;text-shadow:0 0 18px rgba(41,230,255,.6)">ViaNova</div>
 <div style="text-align:center;font-size:11px;letter-spacing:.3em;color:#7ff3ff">
   STEP 1 · SERVICE NEEDS SURVEY · DESIGNED WITH FLASHPOINT.AI</div>""", unsafe_allow_html=True)
     _c = st.columns([1, 2, 1])
@@ -734,7 +862,7 @@ if not case.service_profile:
             case.language = _lp
             st.session_state.voice_lang = _lp
             for m in case.transcript:
-                if m["role"] == "jarvis":
+                if m["role"] == "vianova":
                     m["text_local"] = _local(m["text"]); m["lang"] = _lp
             st.rerun()
         _intro = ("Nine quick questions so a lawyer knows how to help you. "
@@ -795,7 +923,7 @@ def _handle_answer(raw: str, source: str = "typed", stt: dict | None = None) -> 
         return
     english = raw
     if case.language != "English":
-        with st.spinner("JARVIS understanding your words"):
+        with st.spinner("ViaNova understanding your words"):
             english, prof = dialect.to_english(raw, case.language)
         rank_c = {"high": 3, "medium": 2, "low": 1}
         if rank_c.get(prof.get("confidence"), 0) >= rank_c.get(case.dialect.get("confidence"), 0):
@@ -804,7 +932,7 @@ def _handle_answer(raw: str, source: str = "typed", stt: dict | None = None) -> 
     case.original_answers.append({"lang": case.language, "source": source, "original": raw,
                                   "english": english, "stt": stt or {}})
     _cmd = english.strip().lower().rstrip(".!")
-    _RESEARCH_CMDS = {"run research", "research", "jarvis run research"}
+    _RESEARCH_CMDS = {"run research", "research", "vianova run research"}
     _FIRST_STEP_CMDS = {"what do i do first", "first step", "what do i do", "next step", "what now"}
     if _cmd in _RESEARCH_CMDS:
         case.transcript.append({"role": "user", "text": english, "text_local": raw})
@@ -823,7 +951,7 @@ def _handle_answer(raw: str, source: str = "typed", stt: dict | None = None) -> 
         nxt = case.next_question()
         _ask(ADVICE_REFUSAL + (f"\n\n{nxt[1]}" if nxt else ""))
         return
-    with st.spinner("JARVIS processing"):
+    with st.spinner("ViaNova processing"):
         orch.extract_facts(case, english)
         case.transcript[-1]["text_local"] = raw
         orch.classify(case)
@@ -844,14 +972,21 @@ def _handle_answer(raw: str, source: str = "typed", stt: dict | None = None) -> 
         case.save()
 
 
-answer = st.chat_input("Type or speak to JARVIS, in English, Spanish, Georgian or Egyptian Arabic")
+answer = st.chat_input("Type or speak to ViaNova, in English, Spanish, Georgian or Egyptian Arabic")
 if answer:
+    # Verbal language-switch check applies in both text and voice modes
+    _lang_sw = _detect_language_switch(answer)
+    if _lang_sw and _lang_sw != case.language:
+        case.language = _lang_sw
+        st.session_state.voice_lang = _lang_sw
+        _vianova_speak(f"Switching to {_lang_sw}.")
+        st.rerun()
     _handle_answer(answer, "typed")
     st.rerun()
 
 if st.session_state.pop("run_research", False):
     if st.session_state.voice_mode:
-        _jarvis_speak("Please wait while I search official legal sources. This will take a moment.")
+        _vianova_speak("Please wait while I search official legal sources. This will take a moment.")
     with st.spinner("Agents dispatched: StatuteAgent, ContextAgent, ValidatorAgent"):
         orch.research(case)
     case.save()
@@ -861,16 +996,16 @@ if st.session_state.pop("run_research", False):
         action_items = _build_action_items()
         lang = st.session_state.voice_lang
         summary_prompt = (
-            f"You are JARVIS, a British-accented AI legal assistant. The user's case:\n"
+            f"You are ViaNova, a British-accented AI legal assistant. The user's case:\n"
             f"{case.summary_text()}\n\nResearch findings:\n{findings_text}\n\n"
             f"Action items:\n" + "\n".join(f"- {a}" for a in action_items) + "\n\n"
             f"Summarize conversationally. Be clear, concise, warm. Mention key laws, "
             f"deadlines, action items. Ask if they have follow-up questions. "
             f"Under 200 words. Language: {lang}."
         )
-        with st.spinner("JARVIS composing summary..."):
+        with st.spinner("ViaNova composing summary..."):
             summary = _claude_chat([{"role": "user", "content": summary_prompt}],
-                                   system=GUARDRAIL + "\nSpeak in a warm British manner like JARVIS.")
+                                   system=GUARDRAIL + "\nSpeak in a warm British manner like ViaNova.")
         st.session_state.voice_summary = summary
         st.session_state.voice_messages = [{"role": "assistant", "content": summary}]
 
@@ -895,7 +1030,7 @@ _tb_left, _tb_right = st.columns([4, 1])
 with _tb_left:
     st.markdown(f"""
     <div class="topbar">
-      <div class="brand">J.A.R.V.I.S.<small>IMMIGRATION · VOICE INTAKE · FLASHPOINT VERIFIED</small></div>
+      <div class="brand">ViaNova<small>IMMIGRATION · VOICE INTAKE · FLASHPOINT VERIFIED</small></div>
       <div>{mode}<span class="chip">USER: {esc(USER).upper()}</span><span class="chip">CASE {esc(case.created)}</span>
       <span class="chip">{time.strftime('%a %b %d  %H:%M')}</span>{_voice_chip}
       <span class="chip ok">LANGUAGE: {esc(case.language).upper()}</span></div>
@@ -922,18 +1057,18 @@ with _tb_right:
         case.language = _pick
         st.session_state.voice_lang = _pick
         case.dialect = {}
-        orch._log("JARVIS", f"language set to {_pick}")
+        orch._log("ViaNova", f"language set to {_pick}")
         try:
             _wm = _json.loads(_CAL_FILE.read_text()).get(_pick, {}).get("winning_message", "")
         except Exception:
             _wm = ""
         if _wm:
             orch._log("FlashpointAgent", f"opening with community tested message: {_wm}")
-            case.transcript.insert(len(case.transcript) - 1, {"role": "jarvis", "text": _wm,
+            case.transcript.insert(len(case.transcript) - 1, {"role": "vianova", "text": _wm,
                                    "text_local": dialect.translate(_wm, _pick), "lang": _pick})
         # re render the current question in the new language
         for m in reversed(case.transcript):
-            if m["role"] == "jarvis":
+            if m["role"] == "vianova":
                 m["text_local"] = _local(m["text"]); m["lang"] = _pick
                 break
         st.rerun()
@@ -954,7 +1089,7 @@ left, center, right = st.columns([1.15, 1.3, 1.15], gap="medium")
 # ------------------------------------------------------------------ LEFT: intake
 with left:
     st.markdown(_service_panel(), unsafe_allow_html=True)
-    _lm = next((m for m in reversed(case.transcript) if m["role"] == "jarvis"), {"text": ""})
+    _lm = next((m for m in reversed(case.transcript) if m["role"] == "vianova"), {"text": ""})
     last_q = _lm.get("text_local") or _lm["text"]
     _rtl = ' dir="rtl" style="text-align:right"' if lang_spec(case.language)["rtl"] else ""
     _en_line = (f'<div class="log" style="margin-top:6px">EN · {esc(_lm["text"])}</div>'
@@ -979,7 +1114,7 @@ with left:
             st.warning(f"Could not transcribe: {_tr.get('error', 'no speech detected')}")
 
     if case.dialect:
-        st.markdown(f'<div class="panel"><div class="ptitle">DIALECT // HOW JARVIS HEARS YOU</div>'
+        st.markdown(f'<div class="panel"><div class="ptitle">DIALECT // HOW ViaNova HEARS YOU</div>'
                     f'<div class="fact"><b>VARIETY</b><span>{esc(case.dialect.get("variety", ""))}</span></div>'
                     f'<div class="fact"><b>CONFIDENCE</b><span>{esc(case.dialect.get("confidence", ""))}</span></div>'
                     + "".join(f'<div class="fact"><b>{esc(t.get("term", ""))}</b><span>{esc(t.get("likely_meaning", ""))}</span></div>'
@@ -1066,7 +1201,7 @@ with center:
             st.markdown(f'<div class="log" style="text-align:center;margin-top:8px">{esc(why[0])}</div>', unsafe_allow_html=True)
 
     if not st.session_state.voice_mode:
-        # --- JARVIS VOICE button (glowing, centered) + standard buttons ---
+        # --- ViaNova VOICE button (glowing, centered) + standard buttons ---
         b1, b2, b3 = st.columns([1, 1.2, 1])
         with b1:
             if st.button("RUN RESEARCH", disabled=not all(k in case.facts for k in ("narrative", "where")) or not case.when_iso or not case.stage_report):
@@ -1075,7 +1210,7 @@ with center:
         with b2:
             st.markdown("""
             <style>
-            div[data-testid="stColumn"]:nth-child(2) .stButton>button#jarvis-voice-btn {
+            div[data-testid="stColumn"]:nth-child(2) .stButton>button#vianova-voice-btn {
                 background: radial-gradient(circle, rgba(41,230,255,.25), rgba(41,230,255,.05)) !important;
                 border: 2px solid #29e6ff !important;
                 color: #7ff3ff !important;
@@ -1090,7 +1225,7 @@ with center:
                 50% { box-shadow: 0 0 32px rgba(41,230,255,.7), 0 0 80px rgba(41,230,255,.25); }
             }
             </style>""", unsafe_allow_html=True)
-            if st.button("◈  JARVIS VOICE  ◈", key="jarvis-voice-btn"):
+            if st.button("◈  ViaNova VOICE  ◈", key="vianova-voice-btn"):
                 st.session_state.voice_mode = True
                 st.rerun()
         with b3:
@@ -1149,14 +1284,14 @@ with center:
         # If research just completed and we have a voice summary, speak that instead
         _vsummary = st.session_state.pop("voice_summary", None)
         if _vsummary:
-            _jarvis_speak(_vsummary)
+            _vianova_speak(_vsummary)
         else:
-            # Auto-speak latest Jarvis message (only once per message+language)
-            _lmv = next((m for m in reversed(case.transcript) if m["role"] == "jarvis"), None)
+            # Auto-speak latest ViaNova message (only once per message+language)
+            _lmv = next((m for m in reversed(case.transcript) if m["role"] == "vianova"), None)
             _last_j = (_lmv.get("text_local") or _lmv["text"]) if _lmv else None
             _spoken_key = f"_vspoken_{len(case.transcript)}_{case.language}"
             if _last_j and _spoken_key not in st.session_state:
-                _jarvis_speak(_last_j, already_local=bool(_lmv.get("text_local")))
+                _vianova_speak(_last_j, already_local=bool(_lmv.get("text_local")))
                 st.session_state[_spoken_key] = True
 
 # ------------------------------------------------------------------ RIGHT: flashpoint + sources + log
@@ -1204,10 +1339,15 @@ with right:
         orch._log("FlashpointAgent", f"demographics {_r.source} ok={_r.ok} ({_r.seconds:.1f}s)")
         case.save()
         st.rerun()
+    _fp_result: FPResult | None = st.session_state.get("fp_result")
+    _fp_calibration = _calibration()
+    if _fp_result and _fp_result.probe_list:
+        _probe_txt = "ATTORNEY PROBES — " + " | ".join(_fp_result.probe_list[:5])
+        _fp_calibration = (_probe_txt + "\n\n" + _fp_calibration).strip()
     st.markdown(render_flashpoint_panel(
         {"live": fp.live, "address": fp.address or (fp.mode if fp.live else None),
          "spent": fp.spent_usdc()},
-        st.session_state.get("fp_lens"), _calibration(), _descriptor, fp.log), unsafe_allow_html=True)
+        st.session_state.get("fp_lens"), _fp_calibration, _descriptor, fp.log), unsafe_allow_html=True)
     _fl = os.getenv("FLASHLIGHT_URL", "http://localhost:3000")
     st.markdown(f'<div class="panel"><div class="ptitle">COMMUNITY RESEARCH // FLASHLIGHT</div>'
                 f'<div class="log">Team research engine (Khalefa): measures the say vs do gap for a whole '
@@ -1256,11 +1396,11 @@ if st.session_state.get("survey_open") and not case.stage_report:
     _rtl = lang_spec(case.language)["rtl"]
     st.markdown(f'<div class="panel"><div class="ptitle">ON THE SPOT CHECK // FLASHPOINT CALIBRATED SURVEY '
                 f'<span>{esc(case.language).upper()}</span></div>'
-                f'<div class="log">{esc(_local("This check is private: tap your answers, nobody hears them. What you said out loud and what you tap here are compared, so JARVIS catches any misunderstanding before research. You can answer I am not sure."))}</div>'
+                f'<div class="log">{esc(_local("This check is private: tap your answers, nobody hears them. What you said out loud and what you tap here are compared, so ViaNova catches any misunderstanding before research. You can answer I am not sure."))}</div>'
                 f'<div class="log" style="color:#7ff3ff">SAY (voice intake) → BELIEVE / DO (private check) → GAP DETECTOR</div></div>',
                 unsafe_allow_html=True)
     with st.spinner("Preparing the check in your language"):
-        _summary_en = ("You told JARVIS: " + "; ".join(
+        _summary_en = ("You told ViaNova: " + "; ".join(
             f"{SLOT_LABELS.get(k, k)}: {v}" for k, v in case.facts.items()
             if k in ("narrative", "notices", "filed", "goal", "helper")))[:600]
         _flat, _shape = [], []
@@ -1288,7 +1428,7 @@ if st.session_state.get("survey_open") and not case.stage_report:
         st.session_state.survey_open = False
         orch._log("SurveyAgent", f"stage={_rep.stage} verified={_rep.verified} "
                                  f"mismatches={len(_rep.mismatches)}")
-        wfm.log_event(wf, "JARVIS + Flashpoint", f"triage: stage {_rep.stage}, verified={_rep.verified}, gaps={len(_rep.mismatches)}")
+        wfm.log_event(wf, "ViaNova + Flashpoint", f"triage: stage {_rep.stage}, verified={_rep.verified}, gaps={len(_rep.mismatches)}")
         if _rep.mismatches:
             _ask("Thank you. A few answers did not match what I understood earlier: "
                  + " ".join(_rep.mismatches) + " Please tell me in your own words what is correct.")
@@ -1315,14 +1455,14 @@ if case.stage_report:
 if case.stage_report:
     st.write("")
     st.markdown('<div class="panel"><div class="ptitle">FIRM WORKFLOW // WHO DOES WHAT</div>'
-                '<div class="log">JARVIS prepares; people decide. Conflict clearance, the consultation decision, '
+                '<div class="log">ViaNova prepares; people decide. Conflict clearance, the consultation decision, '
                 'and engagement are always signed off by staff.</div></div>', unsafe_allow_html=True)
     _t = st.tabs(["1.2 CONFLICT CHECK", "1.3 CONSULTATION", "1.4 ENGAGEMENT",
                   "2.1 MATTER", "2.2 DOCUMENTS", "2.3 READINESS AUDIT", "EVENT LOG"])
 
     # ---- 1.2 conflict check
     with _t[0]:
-        st.caption("JARVIS screens names against the firm's client list (data/firm_clients.json). Staff clears. "
+        st.caption("ViaNova screens names against the firm's client list (data/firm_clients.json). Staff clears. "
                    "Names stay on this computer.")
         _pp = st.text_area("Other people involved (one per line: family members, sponsor, employer, opposing party)",
                            value="\n".join(wf["conflict"].get("parties", [])), key="wf_parties", height=90)
@@ -1332,7 +1472,7 @@ if case.stage_report:
                 parties = [p.strip() for p in _pp.splitlines() if p.strip()]
                 wf["conflict"].update({"parties": parties, "hits": wfm.conflict_check(parties)})
                 wf["conflict"]["status"] = "flag" if wf["conflict"]["hits"] else "screened"
-                wfm.log_event(wf, "JARVIS", f"conflict screen: {len(parties)} names, {len(wf['conflict']['hits'])} possible hits")
+                wfm.log_event(wf, "ViaNova", f"conflict screen: {len(parties)} names, {len(wf['conflict']['hits'])} possible hits")
                 case.save(); st.rerun()
         for h in wf["conflict"].get("hits", []):
             st.markdown(f'<div class="alert warning">Possible conflict: <b>{esc(h["party"])}</b> matches '
@@ -1371,7 +1511,7 @@ if case.stage_report:
 
     # ---- 1.4 engagement
     with _t[2]:
-        st.caption("Retainer and fees are handled by people. JARVIS only drafts a summary for the attorney.")
+        st.caption("Retainer and fees are handled by people. ViaNova only drafts a summary for the attorney.")
         _fee = st.text_input("Fee arrangement", value=wf["engage"].get("fee", ""), key="wf_fee")
         _waiver = st.checkbox("Pro bono or fee waiver", value=wf["engage"].get("fee_waiver", False), key="wf_waiver")
         _draft = wfm.ENGAGEMENT_TEMPLATE.format(
@@ -1388,7 +1528,7 @@ if case.stage_report:
             wf["matter"] = {"status": "done", "id": wfm.matter_id(case)}
             wf["docs"]["status"] = "active"
             wfm.log_event(wf, "Staff", "client engaged; retainer signed")
-            wfm.log_event(wf, "JARVIS", f"matter opened {wf['matter']['id']}")
+            wfm.log_event(wf, "ViaNova", f"matter opened {wf['matter']['id']}")
             case.save(); st.rerun()
 
     # ---- 2.1 matter
@@ -1436,11 +1576,11 @@ if case.stage_report:
         if not _ups:
             st.info("The audit runs on uploaded documents.")
         else:
-            if st.button("JARVIS: PRE AUDIT DOCUMENTS"):
+            if st.button("ViaNova: PRE AUDIT DOCUMENTS"):
                 with st.spinner("Checking each document (quality and completeness only)"):
                     for k, u in _ups.items():
                         wf["audit"]["results"][k] = wfm.audit_document(Path(u["path"]), u["label"])
-                wfm.log_event(wf, "JARVIS", f"pre audit of {len(_ups)} documents")
+                wfm.log_event(wf, "ViaNova", f"pre audit of {len(_ups)} documents")
                 case.save(); st.rerun()
             _usable, _problem = [], []
             for k, r in wf["audit"].get("results", {}).items():
@@ -1486,7 +1626,7 @@ if orch.findings:
     st.markdown(render_validator_summary(orch.findings), unsafe_allow_html=True)
 
     # Educational disclaimer under findings
-    st.markdown('<div class="disclaimer">JARVIS Immigration is an educational prototype. '
+    st.markdown('<div class="disclaimer">ViaNova Immigration is an educational prototype. '
                 'It shares general legal information only. Confirm all deadlines with a '
                 'licensed attorney, legal aid, or a court help center.</div>',
                 unsafe_allow_html=True)
@@ -1603,12 +1743,12 @@ if case.primary_area and case.primary_area != "Immigration" and not case.stage_r
 # ------------------------------------------------------------------ voice follow-up chat (after research)
 if st.session_state.voice_mode and orch.findings and st.session_state.voice_messages:
     st.markdown("""
-    <div class="panel"><div class="ptitle">JARVIS FOLLOW-UP · VOICE</div>
+    <div class="panel"><div class="ptitle">ViaNova FOLLOW-UP · VOICE</div>
     <div style="font-size:12px; color:#d8f6ff;">
-      Ask follow-up questions about your case. JARVIS is listening.</div></div>""",
+      Ask follow-up questions about your case. ViaNova is listening.</div></div>""",
                 unsafe_allow_html=True)
     for m in st.session_state.voice_messages:
-        who = "JARVIS" if m["role"] == "assistant" else USER.split()[0].upper()
+        who = "ViaNova" if m["role"] == "assistant" else USER.split()[0].upper()
         st.markdown(f'<div class="panel" style="margin-bottom:6px;">'
                     f'<div style="font-size:11px; color:var(--cyan); letter-spacing:.2em;">{who}</div>'
                     f'<div style="font-size:13px; color:#e9fbff; margin-top:4px; white-space:pre-wrap;">'
@@ -1616,14 +1756,21 @@ if st.session_state.voice_mode and orch.findings and st.session_state.voice_mess
 
     _followup = st.chat_input("Ask a follow-up question...", key="voice_followup")
     if _followup:
+        # Check for verbal language-switch request before normal processing
+        _switch_lang = _detect_language_switch(_followup)
+        if _switch_lang and _switch_lang != st.session_state.voice_lang:
+            st.session_state.voice_lang = _switch_lang
+            case.language = _switch_lang
+            _vianova_speak(f"Switching to {_switch_lang}.")
+            st.rerun()
         st.session_state.voice_messages.append({"role": "user", "content": _followup})
         _lang = st.session_state.voice_lang
         _sys = (GUARDRAIL +
-                f"\nYou are JARVIS, warm British manner.\nCase: {case.summary_text()}\n"
+                f"\nYou are ViaNova, warm British manner.\nCase: {case.summary_text()}\n"
                 f"Findings: {_build_findings_summary()}\n"
                 f"Actions: {', '.join(_build_action_items())}\n"
                 f"Respond in {_lang}. Under 150 words.")
-        with st.spinner("JARVIS thinking..."):
+        with st.spinner("ViaNova thinking..."):
             _reply = _claude_chat(st.session_state.voice_messages, system=_sys)
         st.session_state.voice_messages.append({"role": "assistant", "content": _reply})
         st.rerun()
@@ -1632,12 +1779,12 @@ if st.session_state.voice_mode and orch.findings and st.session_state.voice_mess
     if st.session_state.voice_messages[-1]["role"] == "assistant":
         _sk = f"_vchat_spoken_{len(st.session_state.voice_messages)}_{st.session_state.voice_lang}"
         if _sk not in st.session_state:
-            _jarvis_speak(st.session_state.voice_messages[-1]["content"])
+            _vianova_speak(st.session_state.voice_messages[-1]["content"])
             st.session_state[_sk] = True
 
 with st.expander("TRANSCRIPT"):
     for m in case.transcript:
-        who = "JARVIS" if m["role"] == "jarvis" else USER.split()[0].upper()
+        who = "ViaNova" if m["role"] == "vianova" else USER.split()[0].upper()
         _orig = m.get("text_local")
         _extra = f' <span style="color:#7ff3ff">[{esc(_orig)}]</span>' if _orig and _orig != m["text"] else ""
         st.markdown(f'<div class="log"><b>{who}</b> {esc(m["text"])}{_extra}</div>', unsafe_allow_html=True)
