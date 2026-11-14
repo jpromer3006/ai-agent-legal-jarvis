@@ -23,8 +23,11 @@ LAW_AREAS: dict[str, dict] = {
     },
     "Immigration": {
         "icon": "IMM",
-        "keywords": ["visa", "green card", "asylum", "deport", "uscis", "citizenship",
-                     "naturaliz", "ice ", "removal", "daca", "work permit", "border"],
+        "keywords": ["visa", "green card", "asylum", "deport", "deportation", "uscis", "citizenship",
+                     "naturalization", "ice", "removal", "daca", "work permit", "border",
+                     "immigration", "immigration court", "notice to appear", "nta", "tps",
+                     "i-589", "i-765", "parole", "detention", "undocumented", "papers",
+                     "refugee", "persecution", "a-number", "eoir", "cbp", "overstay"],
     },
     "Criminal": {
         "icon": "CRM",

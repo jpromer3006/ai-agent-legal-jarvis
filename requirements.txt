@@ -1,4 +1,7 @@
 streamlit>=1.40
 anthropic>=1.0
 python-dotenv>=1.0
-elevenlabs>=1.0
+elevenlabs>=2.0
+requests>=2.33
+eth-account>=0.13
+x402[evm,requests]>=2.28

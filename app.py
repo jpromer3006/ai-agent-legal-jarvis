@@ -1,4 +1,8 @@
-"""JARVIS Legal OS: holographic command center (Streamlit).
+"""JARVIS Immigration: voice first immigration legal information (Streamlit).
+
+English is the main language; Spanish, Georgian and Egyptian Arabic are the
+test languages. Flashpoint.AI supplies the community lens and the calibrated
+on the spot procedural survey that verifies the voice intake.
 
 Run:  streamlit run app.py
 """
@@ -18,6 +22,9 @@ try:
     load_dotenv(Path(__file__).parent / ".env")
 except ImportError:
     pass
+# Hackathon Claude key (from the organizers) takes priority today; personal key is the fallback.
+if os.getenv("ANTHROPIC_API_KEY_HACKATHON"):
+    os.environ["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY_HACKATHON"]
 
 from core.authority import TIER_LABELS
 from core.classifier import LAW_AREAS
@@ -30,13 +37,21 @@ from core.lawyer import claude_legal_chat, generate_irac_memo, memo_to_pdf
 from core.procedure import select_procedure, locate_stages
 from ui.procedure_map import render_procedure_map
 from ui.agent_view import render_agent_cards, render_validator_summary
+from ui.immigration_view import render_stage_map, render_flashpoint_panel, CSS as IMM_CSS
+from core import dialect
+from core.languages import LANGUAGES, TEST_LANGUAGES, lang as lang_spec
+from core.flashpoint import FlashpointClient
+from core.immigration import SURVEY, score_survey, GAP_SURVEY
+from core import workflow as wfm
+from ui.workflow_view import render_tracker, render_events
+import json as _json
 
 try:
     import anthropic as _anthropic_mod
 except ImportError:
     _anthropic_mod = None
 
-st.set_page_config(page_title="JARVIS Legal OS", page_icon="⚖️", layout="wide",
+st.set_page_config(page_title="JARVIS Immigration", page_icon="⚖️", layout="wide",
                    initial_sidebar_state="collapsed")
 
 USER = os.getenv("JARVIS_USER", "GUEST")
@@ -54,8 +69,47 @@ if "case" not in st.session_state:
     st.session_state.lawyer_messages = []       # Claude Legal chat history
     st.session_state.lawyer_sources = []        # accumulated sources from chat
     st.session_state.lawyer_memo = None         # generated IRAC memo text
+    st.session_state.fp = FlashpointClient()
+    st.session_state.fp_lens = None
+    st.session_state.survey_open = False
 case: CaseFile = st.session_state.case
 orch: Orchestrator = st.session_state.orch
+fp: FlashpointClient = st.session_state.setdefault("fp", FlashpointClient())
+
+if not case.workflow:
+    case.workflow = wfm.default_state()
+wf: dict = case.workflow
+
+_CAL_FILE = Path(__file__).parent / "data" / "flashpoint_calibration.json"
+
+
+def _gap_map(language: str | None = None) -> list:
+    try:
+        return _json.loads(_CAL_FILE.read_text()).get(language or case.language, {}).get("gap_map", []) or []
+    except Exception:
+        return []
+
+
+def _calibration(language: str | None = None) -> str:
+    """Flashpoint survey calibration notes for this language community (prebuilt)."""
+    language = language or case.language
+    try:
+        return _json.loads(_CAL_FILE.read_text()).get(language, {}).get("notes", "")
+    except Exception:
+        return ""
+
+
+def _local(text_en: str) -> str:
+    """English text rendered in the person's language and dialect."""
+    if case.language == "English":
+        return text_en
+    return dialect.render_question(text_en, case.language, case.dialect, _calibration())
+
+
+def _ask(text_en: str) -> None:
+    """Jarvis says something: English is canonical, the person sees their language."""
+    case.transcript.append({"role": "jarvis", "text": text_en, "text_local": _local(text_en),
+                            "lang": case.language})
 
 # ------------------------------------------------------------------ theme
 CSS = """
@@ -206,6 +260,8 @@ if not st.session_state.consent_given:
   <div style="font-size:20px; line-height:2; color:#e9fbff; text-shadow:0 0 6px rgba(41,230,255,.3);">
     This is an <b style="color:#29e6ff;">educational prototype</b> for general legal information only.<br>
     It is <b style="color:#ff4d6d;">not</b> legal advice and does not replace a licensed attorney.<br>
+    JARVIS never asks for an A-number, SSN, or passport number, and never shares your story.<br>
+    Only an anonymous community description (language + neighborhood) is sent to Flashpoint.AI.<br>
     Any deadline shown is an estimate — confirm with a lawyer or legal aid.<br>
     Do not rely on this tool for a real claim.<br>
     <span style="color:#ffb347;">By continuing you acknowledge this disclaimer.</span>
@@ -218,20 +274,16 @@ if not st.session_state.consent_given:
 
 
 # ================================================================== VOICE MODE (overlay on dashboard)
-def _jarvis_speak(text: str) -> None:
+def _jarvis_speak(text: str, already_local: bool = False) -> None:
     """Speak text via ElevenLabs and auto-play in browser.
 
     If a non-English language is selected, translates before speaking so the
     ElevenLabs model renders the correct language with the British voice.
     """
-    lang = st.session_state.get("voice_lang", "English")
-    if lang != "English":
-        translated = _claude_chat(
-            [{"role": "user", "content": f"Translate to {lang}. Return ONLY the translation, nothing else:\n\n{text}"}],
-            system="You are a translator. Output only the translated text."
-        )
-        text = translated
-    audio_b64 = voice.speak_b64(text)
+    lang = case.language
+    if lang != "English" and not already_local:
+        text = _local(text)
+    audio_b64 = voice.speak_b64(text, language=lang)
     if audio_b64:
         st.markdown(voice.autoplay_audio_html(audio_b64), unsafe_allow_html=True)
 
@@ -660,54 +712,70 @@ if not st.session_state.booted:
     st.session_state.booted = True
     slot, q = case.next_question()
     case.pending_slot = slot
-    case.transcript.append({"role": "jarvis", "text": "Good day. I'm JARVIS. I'll take an account of what happened, "
-                            "identify which areas of law may apply, and show you the official sources. " + q})
+    _ask("Good day. I'm JARVIS. I help people understand where they are in the immigration "
+         "process, the rules that apply, and the official forms. This is information, not legal advice. " + q)
 
 # ------------------------------------------------------------------ input handling
-answer = st.chat_input("Speak to JARVIS (or click JARVIS VOICE for full voice mode)")
-if answer:
-    _cmd = answer.strip().lower()
-    # Intercept commands before they reach slot filling
+def _handle_answer(raw: str, source: str = "typed", stt: dict | None = None) -> None:
+    """One answer from the person, typed or spoken, in any of the four languages."""
+    raw = raw.strip()
+    if not raw:
+        return
+    english = raw
+    if case.language != "English":
+        with st.spinner("JARVIS understanding your words"):
+            english, prof = dialect.to_english(raw, case.language)
+        rank_c = {"high": 3, "medium": 2, "low": 1}
+        if rank_c.get(prof.get("confidence"), 0) >= rank_c.get(case.dialect.get("confidence"), 0):
+            case.dialect = {k: v for k, v in prof.items() if k != "english"}
+        orch._log("DialectAgent", f"{prof.get('language')} · {prof.get('variety')} ({prof.get('confidence')})")
+    case.original_answers.append({"lang": case.language, "source": source, "original": raw,
+                                  "english": english, "stt": stt or {}})
+    _cmd = english.strip().lower().rstrip(".!")
     _RESEARCH_CMDS = {"run research", "research", "jarvis run research"}
-    _FIRST_STEP_CMDS = {"what do i do first", "what should i do", "first step",
-                        "what do i do", "next step", "what now"}
+    _FIRST_STEP_CMDS = {"what do i do first", "first step", "what do i do", "next step", "what now"}
     if _cmd in _RESEARCH_CMDS:
-        case.transcript.append({"role": "user", "text": answer})
-        st.session_state.run_research = True
-        st.rerun()
-    elif _cmd in _FIRST_STEP_CMDS:
-        case.transcript.append({"role": "user", "text": answer})
+        case.transcript.append({"role": "user", "text": english, "text_local": raw})
+        if not case.stage_report:
+            st.session_state.survey_open = True
+            _ask("Before I research, please answer the short check below so I'm sure I understood you.")
+        else:
+            st.session_state.run_research = True
+        return
+    if _cmd in _FIRST_STEP_CMDS:
+        case.transcript.append({"role": "user", "text": english, "text_local": raw})
         st.session_state.show_first_step_chat = True
-        st.rerun()
-    elif is_advice_seeking(answer):
-        # P1.4: Intent gate — refuse advice, re-ask pending question
-        case.transcript.append({"role": "user", "text": answer})
-        _pending_q = ""
-        if case.pending_slot:
-            nxt = case.next_question()
-            _pending_q = f"\n\n{nxt[1]}" if nxt else ""
-        case.transcript.append({"role": "jarvis", "text": ADVICE_REFUSAL + _pending_q})
-        st.rerun()
-    else:
-        with st.spinner("JARVIS processing"):
-            orch.extract_facts(case, answer)
-            orch.classify(case)
-            nxt = case.next_question()
-            if nxt:
-                case.pending_slot, q = nxt
-                # If date was vague, ask for exact date
-                if case.when_raw and not case.when_iso:
-                    q = (f"I need an exact date to compute deadlines. "
-                         f"You said \"{case.when_raw}\" — can you give me "
-                         f"the specific date (month, day, year)?")
-                    case.pending_slot = "when"
-                    case.facts.pop("when", None)
-                case.transcript.append({"role": "jarvis", "text": q})
-            else:
-                case.pending_slot = None
-                case.transcript.append({"role": "jarvis", "text": "Intake complete. Say \"run research\" or press RUN RESEARCH and I'll dispatch the agents."})
-            case.save()
-        st.rerun()
+        return
+    if is_advice_seeking(english):
+        case.transcript.append({"role": "user", "text": english, "text_local": raw})
+        nxt = case.next_question()
+        _ask(ADVICE_REFUSAL + (f"\n\n{nxt[1]}" if nxt else ""))
+        return
+    with st.spinner("JARVIS processing"):
+        orch.extract_facts(case, english)
+        case.transcript[-1]["text_local"] = raw
+        orch.classify(case)
+        nxt = case.next_question()
+        if nxt:
+            case.pending_slot, q = nxt
+            if case.when_raw and not case.when_iso:
+                q = (f"I need an exact date (month, day, year) for deadlines. "
+                     f"You said \"{case.when_raw}\". What is the specific date?")
+                case.pending_slot = "when"
+                case.facts.pop("when", None)
+            _ask(q)
+        else:
+            case.pending_slot = None
+            st.session_state.survey_open = True
+            _ask("Thank you. Now a short check of 8 questions, so I'm sure I understood you correctly "
+                 "and know where you are in the immigration process.")
+        case.save()
+
+
+answer = st.chat_input("Type or speak to JARVIS, in English, Spanish, Georgian or Egyptian Arabic")
+if answer:
+    _handle_answer(answer, "typed")
+    st.rerun()
 
 if st.session_state.pop("run_research", False):
     if st.session_state.voice_mode:
@@ -736,20 +804,15 @@ if st.session_state.pop("run_research", False):
 
 # ------------------------------------------------------------------ "what do I do first" chat handler
 if st.session_state.pop("show_first_step_chat", False):
-    _area = case.primary_area or "Torts / Personal Injury"
-    _resp = case.resolved_entity or ""
-    _fs = find_first_step(_area, _resp)
-    if _fs and case.when_iso:
-        _dl = compute_deadline(case.when_iso, _fs["deadline_rule"])
-        _msg = (f"{_fs['first_step_title']}. Your deadline is {_dl.deadline_date.strftime('%B %d, %Y')} "
-                f"({'EXPIRED' if _dl.is_expired else f'{_dl.days_remaining} days remaining'}). "
-                f"Step 1: {_fs['plain_language_steps'][0]}")
-    elif _fs:
-        _msg = (f"{_fs['first_step_title']}. I need the incident date to compute your deadline. "
-                f"Step 1: {_fs['plain_language_steps'][0]}")
+    _rep = case.stage_report
+    if _rep:
+        _urg = [a["text"] for a in _rep.get("alerts", []) if a["level"] == "urgent"]
+        _ask(f"You appear to be at this stage: {_rep['stage_label']}. "
+             + (" ".join(_urg) + " " if _urg else "")
+             + f"The forms usually involved here are {', '.join(_rep.get('forms', []))}. "
+             "For a decision about your own case, contact ActionNYC (call 311) or a licensed immigration attorney.")
     else:
-        _msg = "I don't have enough information yet to identify your first step. Please complete the intake questions."
-    case.transcript.append({"role": "jarvis", "text": _msg})
+        _ask("First, finish the questions and the short check, so I know where you are in the process.")
 
 # ------------------------------------------------------------------ top bar
 mode = '<span class="chip ok">ONLINE</span>' if orch.online else '<span class="chip warn">OFFLINE DEMO</span>'
@@ -760,9 +823,10 @@ _tb_left, _tb_right = st.columns([4, 1])
 with _tb_left:
     st.markdown(f"""
     <div class="topbar">
-      <div class="brand">J.A.R.V.I.S.<small>LEGAL OS · v0.1 · INTAKE + RESEARCH CORE</small></div>
+      <div class="brand">J.A.R.V.I.S.<small>IMMIGRATION · VOICE INTAKE · FLASHPOINT VERIFIED</small></div>
       <div>{mode}<span class="chip">USER: {esc(USER).upper()}</span><span class="chip">CASE {esc(case.created)}</span>
-      <span class="chip">{time.strftime('%a %b %d  %H:%M')}</span>{_voice_chip}</div>
+      <span class="chip">{time.strftime('%a %b %d  %H:%M')}</span>{_voice_chip}
+      <span class="chip ok">LANGUAGE: {esc(case.language).upper()}</span></div>
     </div>""", unsafe_allow_html=True)
 with _tb_right:
     st.markdown("""<style>
@@ -778,10 +842,27 @@ with _tb_right:
       box-shadow: 0 0 28px rgba(255,215,0,.6) !important;
     }
     </style>""", unsafe_allow_html=True)
+    _langs = list(LANGUAGES)
+    _pick = st.selectbox("Language", _langs, index=_langs.index(case.language),
+                         format_func=lambda n: f"{n} · {LANGUAGES[n]['native']}" if n != "English" else n,
+                         key="lang_pick", label_visibility="collapsed")
+    if _pick != case.language:
+        case.language = _pick
+        st.session_state.voice_lang = _pick
+        case.dialect = {}
+        orch._log("JARVIS", f"language set to {_pick}")
+        # re render the current question in the new language
+        for m in reversed(case.transcript):
+            if m["role"] == "jarvis":
+                m["text_local"] = _local(m["text"]); m["lang"] = _pick
+                break
+        st.rerun()
     if st.button("LAWYER MODE", key="lawyer-btn"):
         st.session_state.lawyer_mode = True
         st.rerun()
 st.write("")
+
+st.markdown(render_tracker(case, wf), unsafe_allow_html=True)
 
 # ================================================================== LAWYER MODE
 if st.session_state.lawyer_mode:
@@ -792,12 +873,39 @@ left, center, right = st.columns([1.15, 1.3, 1.15], gap="medium")
 
 # ------------------------------------------------------------------ LEFT: intake
 with left:
-    last_q = next((m["text"] for m in reversed(case.transcript) if m["role"] == "jarvis"), "")
+    _lm = next((m for m in reversed(case.transcript) if m["role"] == "jarvis"), {"text": ""})
+    last_q = _lm.get("text_local") or _lm["text"]
+    _rtl = ' dir="rtl" style="text-align:right"' if lang_spec(case.language)["rtl"] else ""
+    _en_line = (f'<div class="log" style="margin-top:6px">EN · {esc(_lm["text"])}</div>'
+                if case.language != "English" and last_q != _lm["text"] else "")
     prog = case.progress()
     st.markdown(f"""
 <div class="panel"><div class="ptitle">INTAKE // CURRENT QUERY <span>{prog * 100:.0f}%</span></div>
-<div class="question">{esc(last_q)}</div>
+<div class="question"{_rtl}>{esc(last_q)}</div>{_en_line}
 <div class="bar"><i style="width:{prog * 100:.0f}%"></i></div></div>""", unsafe_allow_html=True)
+
+    # ---- voice transcription (ElevenLabs Scribe, any of the four languages)
+    _rec = st.audio_input(f"Answer by voice ({case.language})", key=f"rec_{len(case.transcript)}")
+    if _rec is not None:
+        with st.spinner("Transcribing"):
+            _tr = dialect.transcribe(_rec.getvalue(), case.language)
+        if _tr.get("text"):
+            orch._log("VoiceAgent", f"Scribe {_tr.get('language_code') or ''} "
+                      f"p={_tr.get('probability') or 'n/a'}: {len(_tr['text'])} chars")
+            _handle_answer(_tr["text"], "voice", _tr)
+            st.rerun()
+        else:
+            st.warning(f"Could not transcribe: {_tr.get('error', 'no speech detected')}")
+
+    if case.dialect:
+        st.markdown(f'<div class="panel"><div class="ptitle">DIALECT // HOW JARVIS HEARS YOU</div>'
+                    f'<div class="fact"><b>VARIETY</b><span>{esc(case.dialect.get("variety", ""))}</span></div>'
+                    f'<div class="fact"><b>CONFIDENCE</b><span>{esc(case.dialect.get("confidence", ""))}</span></div>'
+                    + "".join(f'<div class="fact"><b>{esc(t.get("term", ""))}</b><span>{esc(t.get("likely_meaning", ""))}</span></div>'
+                              for t in case.dialect.get("terms_to_clarify", []) or [])
+                    + ('<div class="log">Interpreter recommended for legal steps.</div>'
+                       if case.dialect.get("interpreter_recommended") else "")
+                    + '</div>', unsafe_allow_html=True)
 
     rows = "".join(f'<div class="fact"><b>{esc(SLOT_LABELS.get(k, k)).upper()}</b><span>{esc(v)}</span></div>'
                    for k, v in case.facts.items()) or '<div class="log">No facts recorded yet.</div>'
@@ -880,7 +988,7 @@ with center:
         # --- JARVIS VOICE button (glowing, centered) + standard buttons ---
         b1, b2, b3 = st.columns([1, 1.2, 1])
         with b1:
-            if st.button("RUN RESEARCH", disabled=not all(k in case.facts for k in ("narrative", "where")) or not case.when_iso):
+            if st.button("RUN RESEARCH", disabled=not all(k in case.facts for k in ("narrative", "where")) or not case.when_iso or not case.stage_report):
                 st.session_state.run_research = True
                 st.rerun()
         with b2:
@@ -906,7 +1014,7 @@ with center:
                 st.rerun()
         with b3:
             if st.button("NEW CASE"):
-                for k in ("case", "orch", "booted", "consent_given"):
+                for k in ("case", "orch", "booted", "consent_given", "survey_open", "fp_lens"):
                     st.session_state.pop(k, None)
                 st.rerun()
     else:
@@ -927,12 +1035,13 @@ with center:
                 key="voice_lang_select", label_visibility="collapsed")
             if new_lang != st.session_state.voice_lang:
                 st.session_state.voice_lang = new_lang
+                case.language = new_lang
                 st.rerun()
 
         # Buttons row
         v1, v2, v3 = st.columns(3)
         with v1:
-            if st.button("RUN RESEARCH", disabled=not all(k in case.facts for k in ("narrative", "where")) or not case.when_iso, key="vrun"):
+            if st.button("RUN RESEARCH", disabled=not all(k in case.facts for k in ("narrative", "where")) or not case.when_iso or not case.stage_report, key="vrun"):
                 st.session_state.run_research = True
                 st.rerun()
         with v2:
@@ -949,7 +1058,7 @@ with center:
                 st.rerun()
         with v3:
             if st.button("NEW CASE", key="vnew"):
-                for k in ("case", "orch", "booted", "consent_given"):
+                for k in ("case", "orch", "booted", "consent_given", "survey_open", "fp_lens"):
                     st.session_state.pop(k, None)
                 st.rerun()
 
@@ -962,14 +1071,81 @@ with center:
             _jarvis_speak(_vsummary)
         else:
             # Auto-speak latest Jarvis message (only once per message+language)
-            _last_j = next((m["text"] for m in reversed(case.transcript) if m["role"] == "jarvis"), None)
-            _spoken_key = f"_vspoken_{len(case.transcript)}_{st.session_state.voice_lang}"
+            _lmv = next((m for m in reversed(case.transcript) if m["role"] == "jarvis"), None)
+            _last_j = (_lmv.get("text_local") or _lmv["text"]) if _lmv else None
+            _spoken_key = f"_vspoken_{len(case.transcript)}_{case.language}"
             if _last_j and _spoken_key not in st.session_state:
-                _jarvis_speak(_last_j)
+                _jarvis_speak(_last_j, already_local=bool(_lmv.get("text_local")))
                 st.session_state[_spoken_key] = True
 
-# ------------------------------------------------------------------ RIGHT: sources + log
+# ------------------------------------------------------------------ RIGHT: flashpoint + sources + log
 with right:
+    _spec = lang_spec(case.language)
+    _comm = _spec.get("community")
+    _zip = ""
+    import re as _re
+    _m = _re.search(r"\b1\d{4}\b", case.facts.get("where", ""))
+    if _m:
+        _zip = _m.group(0)
+    _descriptor = None
+    if _comm:
+        _loc = f"NYC ZIP {_zip}" if _zip else _comm["location"]
+        _descriptor = f"{_comm['label']} · {_loc}"
+    if not fp.live:
+        if st.button("CONNECT FLASHPOINT (SIGN IN)", help="Opens your browser. Sign in with the account you used at app.flashpoint.ai."):
+            from core.flashpoint import oauth_login
+            with st.spinner("Waiting for you to sign in to Flashpoint in the browser…"):
+                try:
+                    oauth_login()
+                    st.session_state.fp = FlashpointClient()
+                    orch._log("FlashpointAgent", "signed in to Flashpoint (OAuth)")
+                except Exception as e:
+                    st.error(f"Flashpoint sign in failed: {e}")
+            st.rerun()
+    if st.button("FLASHPOINT // COMMUNITY LENS", disabled=_descriptor is None,
+                 help="Live Flashpoint demographics for this language community. "
+                      "Sends only the anonymous community description, never the person's story."):
+        _q = (f"For {_comm['label']}: what share of residents are foreign born, speak "
+              f"{case.language.split()[-1]} at home, and speak English less than very well? "
+              "What does that imply for plain language and interpreter needs?")
+        with st.spinner("Flashpoint.AI demographics (x402)"):
+            _r = fp.demographics(_zip or _comm["location"], question=_q,
+                                 audience=f"{case.language} speaking immigrants")
+        _summary = _r.text
+        if _r.data and isinstance(_r.data, dict):
+            _summary = (_r.data.get("insights") or _r.data.get("summary") or _r.data.get("ai_insights")
+                        or _json.dumps(_r.data, ensure_ascii=False)[:900])
+            if isinstance(_summary, list):
+                _summary = "\n".join(str(x) for x in _summary)
+        st.session_state.fp_lens = {"source": _r.source, "summary": str(_summary)[:900], "ok": _r.ok}
+        case.flashpoint = {"descriptor": _descriptor, "lens": st.session_state.fp_lens,
+                           "cost": _r.cost_usdc}
+        orch._log("FlashpointAgent", f"demographics {_r.source} ok={_r.ok} ({_r.seconds:.1f}s)")
+        case.save()
+        st.rerun()
+    st.markdown(render_flashpoint_panel(
+        {"live": fp.live, "address": fp.address or (fp.mode if fp.live else None),
+         "spent": fp.spent_usdc()},
+        st.session_state.get("fp_lens"), _calibration(), _descriptor, fp.log), unsafe_allow_html=True)
+    _gm = _gap_map()
+    if _gm:
+        _rows = ""
+        for g in _gm:
+            def _bar(v, c):
+                try:
+                    v = float(str(v).strip("%"))
+                except ValueError:
+                    v = 0
+                return (f'<div style="height:6px;background:rgba(41,230,255,.08);margin:2px 0">'
+                        f'<i style="display:block;height:6px;width:{min(v,100):.0f}%;background:{c}"></i></div>')
+            _rows += (f'<div class="fact" style="display:block"><b>{esc(g.get("topic","")).upper()}</b>'
+                      f'<div class="log">SAY {esc(g.get("say_pct",""))}</div>{_bar(g.get("say_pct",0),"#29e6ff")}'
+                      f'<div class="log">BELIEVE {esc(g.get("believe_pct",""))}</div>{_bar(g.get("believe_pct",0),"#ffb347")}'
+                      f'<div class="log">DO {esc(g.get("do_pct",""))}</div>{_bar(g.get("do_pct",0),"#ff4d6d")}'
+                      f'<div style="font-size:12px;color:#d8f6ff">{esc(g.get("gap",""))}</div></div>')
+        st.markdown(f'<div class="panel"><div class="ptitle">SAY · BELIEVE · DO // {esc(case.language).upper()} COMMUNITY '
+                    f'<span>FLASHPOINT PANEL</span></div>{_rows}</div>', unsafe_allow_html=True)
+
     all_sources = [s for f in orch.findings for s in f.sources]
     if all_sources:
         items = ""
@@ -985,6 +1161,226 @@ with right:
     log = "".join(f'<div>{e.t} <b>{esc(e.agent)}</b> {esc(e.msg)}</div>' for e in reversed(orch.log[-40:]))
     st.markdown(f'<div class="panel"><div class="ptitle">AGENT ACTIVITY</div><div class="log">{log}</div></div>',
                 unsafe_allow_html=True)
+
+# ------------------------------------------------------------------ ON THE SPOT SURVEY (security layer)
+if st.session_state.get("survey_open") and not case.stage_report:
+    st.write("")
+    _rtl = lang_spec(case.language)["rtl"]
+    st.markdown(f'<div class="panel"><div class="ptitle">ON THE SPOT CHECK // FLASHPOINT CALIBRATED SURVEY '
+                f'<span>{esc(case.language).upper()}</span></div>'
+                f'<div class="log">{esc(_local("This check is private: tap your answers, nobody hears them. What you said out loud and what you tap here are compared, so JARVIS catches any misunderstanding before research. You can answer I am not sure."))}</div>'
+                f'<div class="log" style="color:#7ff3ff">SAY (voice intake) → BELIEVE / DO (private check) → GAP DETECTOR</div></div>',
+                unsafe_allow_html=True)
+    with st.spinner("Preparing the check in your language"):
+        _summary_en = ("You told JARVIS: " + "; ".join(
+            f"{SLOT_LABELS.get(k, k)}: {v}" for k, v in case.facts.items()
+            if k in ("narrative", "notices", "filed", "goal", "helper")))[:600]
+        _flat, _shape = [], []
+        for item in SURVEY:
+            q = item["q"] + ("\n\n" + _summary_en if item["id"] == "confirm" else "")
+            _shape.append((item["id"], len(item["options"])))
+            _flat += [q] + item["options"]
+        _tr = dialect.translate_batch(_flat, case.language,
+                                      (case.dialect or {}).get("variety", ""), _calibration())
+        _items, _i = [], 0
+        for sid, n in _shape:
+            _items.append((sid, _tr[_i], _tr[_i + 1:_i + 1 + n]))
+            _i += 1 + n
+    with st.form("stage_survey"):
+        _ans = {}
+        for sid, q, opts in _items:
+            _ans[sid] = st.radio(q, list(range(len(opts))), format_func=lambda i, o=opts: o[i],
+                                 index=None, key=f"sv_{sid}")
+        _submitted = st.form_submit_button("SUBMIT CHECK")
+    if _submitted:
+        _clean = {k: v for k, v in _ans.items() if v is not None}
+        _rep = score_survey(_clean, " | ".join(case.facts.values()))
+        case.survey_answers = _clean
+        case.stage_report = _rep.as_dict()
+        st.session_state.survey_open = False
+        orch._log("SurveyAgent", f"stage={_rep.stage} verified={_rep.verified} "
+                                 f"mismatches={len(_rep.mismatches)}")
+        wfm.log_event(wf, "JARVIS + Flashpoint", f"triage: stage {_rep.stage}, verified={_rep.verified}, gaps={len(_rep.mismatches)}")
+        if _rep.mismatches:
+            _ask("Thank you. A few answers did not match what I understood earlier: "
+                 + " ".join(_rep.mismatches) + " Please tell me in your own words what is correct.")
+            case.pending_slot = "narrative"
+        else:
+            _ask(f"Thank you, I understood you correctly. You appear to be at this stage: "
+                 f"{_rep.stage_label}. Press RUN RESEARCH or say 'run research' and I will look up "
+                 "the procedure, the rules, and the official forms.")
+        case.save()
+        st.rerun()
+
+if case.stage_report:
+    st.write("")
+    st.markdown(render_stage_map(case.stage_report), unsafe_allow_html=True)
+    _c1, _c2 = st.columns([1, 5])
+    with _c1:
+        if st.button("RETAKE CHECK"):
+            case.stage_report = {}
+            st.session_state.survey_open = True
+            st.rerun()
+
+
+# ------------------------------------------------------------------ FIRM WORKFLOW (transparent)
+if case.stage_report:
+    st.write("")
+    st.markdown('<div class="panel"><div class="ptitle">FIRM WORKFLOW // WHO DOES WHAT</div>'
+                '<div class="log">JARVIS prepares; people decide. Conflict clearance, the consultation decision, '
+                'and engagement are always signed off by staff.</div></div>', unsafe_allow_html=True)
+    _t = st.tabs(["1.2 CONFLICT CHECK", "1.3 CONSULTATION", "1.4 ENGAGEMENT",
+                  "2.1 MATTER", "2.2 DOCUMENTS", "2.3 READINESS AUDIT", "EVENT LOG"])
+
+    # ---- 1.2 conflict check
+    with _t[0]:
+        st.caption("JARVIS screens names against the firm's client list (data/firm_clients.json). Staff clears. "
+                   "Names stay on this computer.")
+        _pp = st.text_area("Other people involved (one per line: family members, sponsor, employer, opposing party)",
+                           value="\n".join(wf["conflict"].get("parties", [])), key="wf_parties", height=90)
+        _cc1, _cc2 = st.columns(2)
+        with _cc1:
+            if st.button("RUN CONFLICT SCREEN"):
+                parties = [p.strip() for p in _pp.splitlines() if p.strip()]
+                wf["conflict"].update({"parties": parties, "hits": wfm.conflict_check(parties)})
+                wf["conflict"]["status"] = "flag" if wf["conflict"]["hits"] else "screened"
+                wfm.log_event(wf, "JARVIS", f"conflict screen: {len(parties)} names, {len(wf['conflict']['hits'])} possible hits")
+                case.save(); st.rerun()
+        for h in wf["conflict"].get("hits", []):
+            st.markdown(f'<div class="alert warning">Possible conflict: <b>{esc(h["party"])}</b> matches '
+                        f'{esc(h["as"])} <b>{esc(h["matched"])}</b> in matter {esc(h["matter"])}'
+                        f'{" (exact)" if h["exact"] else " (close)"}</div>', unsafe_allow_html=True)
+        if wf["conflict"]["status"] in ("screened", "flag"):
+            with _cc2:
+                _by = st.text_input("Cleared by (staff initials)", key="wf_clear_by")
+                if st.button("STAFF: CLEAR CONFLICTS", disabled=not _by):
+                    wf["conflict"].update({"status": "done", "cleared_by": _by})
+                    wfm.log_event(wf, f"Staff {_by}", "conflicts cleared")
+                    case.save(); st.rerun()
+        if wf["conflict"]["status"] == "done":
+            st.success(f"Cleared by {wf['conflict']['cleared_by']}")
+
+    # ---- 1.3 consultation
+    with _t[1]:
+        st.caption("Attorney reviews history, current status and goals. Open LAWYER MODE (top right) for the "
+                   "case summary, research chat and IRAC memo.")
+        _rep = case.stage_report
+        st.markdown(f"**Stage:** {_rep.get('stage_label')}  ·  **Concerns:** "
+                    f"{', '.join(_rep.get('concerns', [])) or 'none stated'}  ·  **Language:** {case.language}")
+        _cat_default = ("Removal defense" if _rep.get("stage") in ("court", "decision", "appeal")
+                        else "Humanitarian (asylum, withholding, CAT)" if "asylum" in " ".join(case.facts.values()).lower()
+                        else "Not yet decided")
+        _cat = st.selectbox("Category (attorney decides)", wfm.CATEGORIES,
+                            index=wfm.CATEGORIES.index(wf["consult"].get("category") or _cat_default), key="wf_cat")
+        _att = st.text_input("Attorney", value=wf["consult"].get("attorney", ""), key="wf_att")
+        _notes = st.text_area("Strategy notes (attorney only)", value=wf["consult"].get("notes", ""), key="wf_notes")
+        if st.button("ATTORNEY: CONSULTATION COMPLETE", disabled=not _att or wf["conflict"]["status"] != "done"):
+            wf["consult"].update({"status": "done", "category": _cat, "attorney": _att, "notes": _notes})
+            wfm.log_event(wf, f"Attorney {_att}", f"consultation complete: {_cat}")
+            case.save(); st.rerun()
+        if wf["conflict"]["status"] != "done":
+            st.info("Consultation unlocks after conflicts are cleared.")
+
+    # ---- 1.4 engagement
+    with _t[2]:
+        st.caption("Retainer and fees are handled by people. JARVIS only drafts a summary for the attorney.")
+        _fee = st.text_input("Fee arrangement", value=wf["engage"].get("fee", ""), key="wf_fee")
+        _waiver = st.checkbox("Pro bono or fee waiver", value=wf["engage"].get("fee_waiver", False), key="wf_waiver")
+        _draft = wfm.ENGAGEMENT_TEMPLATE.format(
+            matter=wf["matter"].get("id") or "(assigned at matter creation)", language=case.language,
+            interp="yes" if case.language != "English" else "not needed",
+            category=wf["consult"].get("category") or "(pending consultation)",
+            stage=case.stage_report.get("stage_label"), forms=", ".join(case.stage_report.get("forms", [])),
+            fee=_fee or "(to be set)", waiver="yes" if _waiver else "no")
+        st.download_button("DOWNLOAD DRAFT ENGAGEMENT SUMMARY", _draft, file_name="engagement_summary_DRAFT.txt")
+        _signed = st.checkbox("Retainer agreement signed by client and attorney", key="wf_signed",
+                              value=wf["engage"].get("retainer_signed", False))
+        if st.button("STAFF: CLIENT ENGAGED", disabled=not _signed or wf["consult"]["status"] != "done"):
+            wf["engage"].update({"status": "done", "retainer_signed": True, "fee": _fee, "fee_waiver": _waiver})
+            wf["matter"] = {"status": "done", "id": wfm.matter_id(case)}
+            wf["docs"]["status"] = "active"
+            wfm.log_event(wf, "Staff", "client engaged; retainer signed")
+            wfm.log_event(wf, "JARVIS", f"matter opened {wf['matter']['id']}")
+            case.save(); st.rerun()
+
+    # ---- 2.1 matter
+    with _t[3]:
+        if wf["matter"].get("id"):
+            st.markdown(f'<div class="deadline-big">{esc(wf["matter"]["id"])}</div>', unsafe_allow_html=True)
+            st.markdown(f"Folder: `{case.folder.name}` · Category: {wf['consult'].get('category')} · "
+                        f"Attorney: {wf['consult'].get('attorney')} · Language: {case.language}")
+        else:
+            st.info("The matter opens automatically when the client is engaged.")
+
+    # ---- 2.2 documents
+    with _t[4]:
+        if not wf["matter"].get("id"):
+            st.info("Document collection starts after engagement.")
+        else:
+            _items = wfm.checklist(case, wf["consult"].get("category", ""))
+            st.caption("Custom checklist for this category and stage. Files are saved only in the local "
+                       "matter folder. Never upload SSN cards or bank statements unless the attorney asks.")
+            _docdir = case.folder / "documents"
+            for key_, label_en, required in _items:
+                _label = _local(label_en)
+                _have = wf["docs"]["uploads"].get(key_)
+                st.markdown(f"{'✅' if _have else ('🔴' if required else '⚪')} **{esc(_label)}**"
+                            + (f"  ·  _{esc(label_en)}_" if _label != label_en else "")
+                            + ("" if required else "  (optional)"))
+                _up = st.file_uploader(label_en, type=["pdf", "png", "jpg", "jpeg", "webp"],
+                                       key=f"up_{key_}", label_visibility="collapsed")
+                if _up is not None and (_have or {}).get("name") != _up.name:
+                    _docdir.mkdir(parents=True, exist_ok=True)
+                    _dest = _docdir / f"{key_}_{_up.name}"
+                    _dest.write_bytes(_up.getvalue())
+                    wf["docs"]["uploads"][key_] = {"name": _up.name, "path": str(_dest), "label": label_en}
+                    wfm.log_event(wf, "Client", f"uploaded {label_en}")
+                    case.save(); st.rerun()
+            _req = [k for k, _, r in _items if r]
+            _missing = [k for k in _req if k not in wf["docs"]["uploads"]]
+            st.markdown(f"**{len(_req) - len(_missing)} of {len(_req)} required documents received.**")
+            if not _missing and wf["docs"]["status"] != "done":
+                wf["docs"]["status"] = "done"; case.save()
+
+    # ---- 2.3 readiness audit
+    with _t[5]:
+        _ups = wf["docs"].get("uploads", {})
+        if not _ups:
+            st.info("The audit runs on uploaded documents.")
+        else:
+            if st.button("JARVIS: PRE AUDIT DOCUMENTS"):
+                with st.spinner("Checking each document (quality and completeness only)"):
+                    for k, u in _ups.items():
+                        wf["audit"]["results"][k] = wfm.audit_document(Path(u["path"]), u["label"])
+                wfm.log_event(wf, "JARVIS", f"pre audit of {len(_ups)} documents")
+                case.save(); st.rerun()
+            _usable, _problem = [], []
+            for k, r in wf["audit"].get("results", {}).items():
+                ok = r.get("matches_expected") and r.get("legible") and not r.get("red_flags")
+                (_usable if ok else _problem).append((k, r))
+            _items_all = {k: l for k, l, _ in wfm.checklist(case, wf["consult"].get("category", ""))}
+            _missing = [l for k, l in _items_all.items() if k not in _ups]
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown("**READY**")
+                for k, r in _usable:
+                    st.markdown(f"✅ {esc(_items_all.get(k, k))}: {esc(r.get('summary', ''))}")
+            with c2:
+                st.markdown("**RED FLAGS / UNUSABLE**")
+                for k, r in _problem:
+                    st.markdown(f"⚠️ {esc(_items_all.get(k, k))}: " + "; ".join(esc(x) for x in r.get("red_flags", []) or ["does not match expected"]))
+            with c3:
+                st.markdown("**MISSING**")
+                for l in _missing:
+                    st.markdown(f"🔴 {esc(l)}")
+            _by = st.text_input("Paralegal initials", key="wf_audit_by")
+            if st.button("PARALEGAL: CONFIRM READINESS", disabled=not _by or not wf["audit"].get("results")):
+                wf["audit"].update({"status": "done" if not _problem and not _missing else "flag", "confirmed_by": _by})
+                wfm.log_event(wf, f"Paralegal {_by}", f"readiness {'confirmed' if wf['audit']['status'] == 'done' else 'flagged'}")
+                case.save(); st.rerun()
+
+    with _t[6]:
+        st.markdown(render_events(wf), unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ FINDINGS (always shown)
 if orch.findings:
@@ -1002,7 +1398,7 @@ if orch.findings:
     st.markdown(render_validator_summary(orch.findings), unsafe_allow_html=True)
 
     # Educational disclaimer under findings
-    st.markdown('<div class="disclaimer">JARVIS Legal OS is an educational prototype. '
+    st.markdown('<div class="disclaimer">JARVIS Immigration is an educational prototype. '
                 'It shares general legal information only. Confirm all deadlines with a '
                 'licensed attorney, legal aid, or a court help center.</div>',
                 unsafe_allow_html=True)
@@ -1066,7 +1462,7 @@ if _first_step and orch.findings:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-elif orch.findings and _area:
+elif orch.findings and _area and _area != "Immigration":
     # No exact match — show help resources instead of wrong card
     st.markdown("""
     <div class="panel"><div class="ptitle">NEXT STEP</div>
@@ -1078,7 +1474,7 @@ elif orch.findings and _area:
     </div></div>""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ LEGAL PROCEDURE MAP
-if case.primary_area:
+if case.primary_area and case.primary_area != "Immigration" and not case.stage_report:
     _pub_mentioned = "public_entity" in case.facts or case.resolved_entity is not None
     _proc = select_procedure(
         case.primary_area,
@@ -1154,4 +1550,6 @@ if st.session_state.voice_mode and orch.findings and st.session_state.voice_mess
 with st.expander("TRANSCRIPT"):
     for m in case.transcript:
         who = "JARVIS" if m["role"] == "jarvis" else USER.split()[0].upper()
-        st.markdown(f'<div class="log"><b>{who}</b> {esc(m["text"])}</div>', unsafe_allow_html=True)
+        _orig = m.get("text_local")
+        _extra = f' <span style="color:#7ff3ff">[{esc(_orig)}]</span>' if _orig and _orig != m["text"] else ""
+        st.markdown(f'<div class="log"><b>{who}</b> {esc(m["text"])}{_extra}</div>', unsafe_allow_html=True)

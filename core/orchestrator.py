@@ -27,6 +27,8 @@ from typing import Any, Callable, TypeVar
 from .authority import Source, confidence, rank
 from .classifier import AreaScore, LAW_AREAS, baseline_classify
 from .intake import CaseFile
+from .immigration import (RESEARCH_TRACKS, IMMIGRATION_DOMAINS, FORMS_DOMAINS,
+                         STAGES, STAGE_INDEX)
 
 try:
     import anthropic
@@ -51,6 +53,12 @@ GUARDRAIL = """You are JARVIS, a legal information assistant. Hard rules:
 3. When a deadline might exist, say so plainly and tell the person to confirm it with a
    licensed attorney or legal aid organization right away.
 4. If you are unsure or sources conflict, say that.
+5. Immigration safety: never ask for or repeat an A-number, SSN, or passport number.
+   Never judge whether a person's account is credible or whether they "qualify".
+   Never infer status or nationality from language or dialect. Warn that notarios
+   and form preparers are not lawyers in the U.S. Point to ActionNYC (311), legal aid,
+   or a DOJ accredited representative for decisions.
+6. Write so a person with limited schooling understands: short sentences, plain words.
 """
 
 STATUTE_DOMAINS = [
@@ -210,10 +218,17 @@ class Orchestrator:
                     "max_uses": uses}
             if allowed:
                 tool["allowed_domains"] = allowed
-            return self.client.messages.create(
-                model=MODEL, max_tokens=2500, system=GUARDRAIL,
-                messages=[{"role": "user", "content": prompt}], tools=[tool],
-            )
+            msgs = [{"role": "user", "content": prompt}]
+            resp = None
+            for _ in range(4):   # server side search can pause; continue until it ends
+                resp = self.client.messages.create(
+                    model=MODEL, max_tokens=4000, system=GUARDRAIL,
+                    messages=msgs, tools=[tool],
+                )
+                if resp.stop_reason != "pause_turn":
+                    break
+                msgs = msgs[:1] + [{"role": "assistant", "content": resp.content}]
+            return resp
 
         resp = safe_call(_call, default=None)
         if resp is None:
@@ -301,6 +316,8 @@ class Orchestrator:
         text = " ".join(case.facts.values())
         base = baseline_classify(text)
 
+        if not base:
+            base = [AreaScore("Immigration", 1.0, [])]
         if not self.online:
             case.areas = base
             self._log("ClassifierAgent",
@@ -336,59 +353,61 @@ class Orchestrator:
     # ---------------------------------------------------------- research run
     def research(self, case: CaseFile,
                  jurisdiction: str = "New York, NY") -> list[Finding]:
-        """Dispatch StatuteAgent and ContextAgent in parallel, then validate.
+        """Immigration research in three tracks, run in parallel, then validated.
 
-        Uses ThreadPoolExecutor to run both agents concurrently.
+        ProcedureAgent  where the person is and what happens next
+        StatuteAgent    INA, 8 C.F.R., current policy (rules and regulations)
+        FormsAgent      the actual application forms and filing instructions
+        ContextAgent    plain language legal aid guides (context only)
         """
         self.findings = []
-        area = case.primary_area or "General"
+        area = case.primary_area or "Immigration"
+        stage = (case.stage_report or {}).get("stage_label", "not yet determined")
+        forms = ", ".join((case.stage_report or {}).get("forms", [])) or "to be determined"
+        from .immigration import CONCERNS
+        concerns = ", ".join(CONCERNS[c]["label"] for c in (case.stage_report or {}).get("concerns", [])
+                             if c in CONCERNS) or "none stated"
 
         if not self.online:
             self.findings = demo_findings(area)
-            self._log("StatuteAgent", "offline demo findings loaded")
+            self._log("ProcedureAgent", "offline demo findings loaded")
             self._log("ValidatorAgent", "validated demo set")
             return self.findings
 
         facts = case.summary_text()
+        header = (f"Area: {area}. Jurisdiction: {jurisdiction} (federal immigration law, "
+                  f"NYC immigration courts). Procedural stage from the on the spot survey: {stage}. "
+                  f"Candidate forms: {forms}. Status concerns the person raised: {concerns}. "
+                  "Address each concern with the official .gov tool or rule that applies "
+                  "(processing backlogs, work authorization, detention, removal, family separation). "
+                  f"\nFacts (English):\n{facts}\n\n")
         t_start = time.time()
 
-        def _statute():
-            t0 = time.time()
-            self._log("StatuteAgent", f"searching primary law for {area} in {jurisdiction}")
-            result = self._search(
-                "StatuteAgent",
-                f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
-                "Identify the statutes, regulations, municipal codes, and official "
-                "procedures that govern a matter like this, including any filing or "
-                "notice deadlines. Cite each one. Do NOT compute deadline dates — "
-                "only state the rules.",
-                STATUTE_DOMAINS, 4,
-            )
-            result.title = f"Governing law: {area}"
-            self._log("StatuteAgent", f"done in {time.time() - t0:.1f}s")
-            return result
+        jobs = {
+            "ProcedureAgent": ("Procedure: where you are and what comes next",
+                               RESEARCH_TRACKS["ProcedureAgent"], IMMIGRATION_DOMAINS, 3),
+            "StatuteAgent": ("Rules and regulations",
+                             RESEARCH_TRACKS["StatuteAgent"], IMMIGRATION_DOMAINS, 4),
+            "FormsAgent": ("The application forms",
+                           RESEARCH_TRACKS["FormsAgent"], FORMS_DOMAINS, 3),
+            "ContextAgent": ("Plain language guides",
+                             "Find plain language guides from legal aid organizations or "
+                             "government agencies, ideally available in the person's language "
+                             f"({case.language}). Prefer .gov pages (uscis.gov, justice.gov/eoir, "
+                             "nyc.gov, ny.gov). Label which are which.", IMMIGRATION_DOMAINS, 2),
+        }
 
-        def _context():
+        def _run(agent, title, task, domains, uses):
             t0 = time.time()
-            self._log("ContextAgent", "searching guides, news, and community context")
-            result = self._search(
-                "ContextAgent",
-                f"Area: {area}. Jurisdiction: {jurisdiction}.\nFacts:\n{facts}\n\n"
-                "Find plain language guides from legal aid or bar associations, "
-                "recent news, and reputable explainer videos about this kind of "
-                "matter. Label which are which.",
-                None, 2,
-            )
-            result.title = "Plain language context"
-            self._log("ContextAgent", f"done in {time.time() - t0:.1f}s")
-            return result
+            self._log(agent, f"searching: {title}")
+            r = self._search(agent, header + task, domains, uses)
+            r.title = title
+            self._log(agent, f"done in {time.time() - t0:.1f}s")
+            return r
 
-        # Run agents in parallel
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            fut_statute = pool.submit(_statute)
-            fut_context = pool.submit(_context)
-            self.findings.append(fut_statute.result())
-            self.findings.append(fut_context.result())
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futs = [pool.submit(_run, a, *spec) for a, spec in jobs.items()]
+            self.findings = [f.result() for f in futs]
 
         self._validate()
         self._log("Research", f"total wall time: {time.time() - t_start:.1f}s")
@@ -443,10 +462,10 @@ def demo_findings(area: str) -> list[Finding]:
             ),
             agent="StatuteAgent", status="unsupported",
             sources=rank([
-                s("https://www.nysenate.gov/legislation/laws/GMU/50-E",
-                  "NY General Municipal Law 50-E", "StatuteAgent"),
-                s("https://www.nycourts.gov/courthelp/",
-                  "NY CourtHelp", "StatuteAgent"),
+                s("https://www.law.cornell.edu/uscode/text/8/1158",
+                  "8 U.S.C. 1158 Asylum", "StatuteAgent"),
+                s("https://www.uscis.gov/i-589",
+                  "USCIS Form I-589", "FormsAgent"),
             ]),
         ),
         Finding(
@@ -457,7 +476,7 @@ def demo_findings(area: str) -> list[Finding]:
             ),
             agent="ContextAgent", status="unsupported",
             sources=rank([
-                s("https://www.lawhelpny.org/", "LawHelpNY", "ContextAgent"),
+                s("https://www.nyc.gov/site/immigrants/help/legal-services/actionnyc.page", "ActionNYC", "ContextAgent"),
             ]),
         ),
     ]

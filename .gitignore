@@ -6,3 +6,8 @@ cases/
 cache/
 *.pyc
 .DS_Store
+
+*.env
+!.env.example
+cache/
+data/flashpoint_calibration.json.bak

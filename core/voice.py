@@ -1,41 +1,32 @@
-"""Voice layer: ElevenLabs TTS + browser Web Speech API STT.
+"""Voice layer: ElevenLabs TTS + browser Web Speech STT + ElevenLabs Scribe STT.
 
-TTS uses ElevenLabs Turbo v2.5 (multi-language) with a British voice for
-the JARVIS persona. Supports English, Spanish, Mandarin, and Hindi — all
-spoken with the same British accent.
-
-STT uses the browser's built-in Web Speech API via a custom Streamlit HTML
-component (no server-side mic needed).
+English is the main language. Spanish, Georgian and Egyptian Arabic are the
+test languages. Turbo v2.5 speaks English, Spanish and Arabic; Georgian uses
+Eleven v3, and if that model is unavailable on the account Jarvis shows the
+Georgian text on screen instead of speaking it.
 """
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from io import BytesIO
+
+from .languages import LANGUAGES, lang
 
 try:
     from elevenlabs import ElevenLabs
 except ImportError:
     ElevenLabs = None
 
-# George — British, warm storyteller. Best Jarvis fit.
-DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
-MODEL_ID = "eleven_turbo_v2_5"  # multi-language: EN, ES, ZH, HI + 28 more
+logger = logging.getLogger("jarvis.voice")
 
-LANGUAGES = {
-    "English":  "en",
-    "Spanish":  "es",
-    "Mandarin": "zh",
-    "Hindi":    "hi",
-}
+# George: British, warm. The JARVIS persona across every language.
+DEFAULT_VOICE_ID = os.getenv("JARVIS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
+MODEL_ID = "eleven_turbo_v2_5"
 
-# Web Speech API language codes for STT
-STT_LANG_CODES = {
-    "English":  "en-US",
-    "Spanish":  "es-ES",
-    "Mandarin": "zh-CN",
-    "Hindi":    "hi-IN",
-}
+# Backward compatible maps used by app.py
+STT_LANG_CODES = {name: spec["web_stt"] for name, spec in LANGUAGES.items()}
 
 
 def _get_client() -> "ElevenLabs | None":
@@ -45,36 +36,37 @@ def _get_client() -> "ElevenLabs | None":
     return ElevenLabs(api_key=key)
 
 
-def speak(text: str, voice_id: str | None = None) -> bytes | None:
-    """Convert text to speech via ElevenLabs. Returns mp3 bytes or None."""
+def speak(text: str, voice_id: str | None = None, language: str = "English") -> bytes | None:
+    """Text to speech. Returns mp3 bytes, or None if this language can't be voiced."""
     client = _get_client()
-    if client is None:
+    if client is None or not text.strip():
         return None
-    audio_iter = client.text_to_speech.convert(
-        text=text,
-        voice_id=voice_id or DEFAULT_VOICE_ID,
-        model_id=MODEL_ID,
-        output_format="mp3_44100_128",
-    )
-    buf = BytesIO()
-    for chunk in audio_iter:
-        buf.write(chunk)
-    return buf.getvalue()
+    models = [lang(language)["tts_model"]]
+    if MODEL_ID not in models and language != "Georgian":
+        models.append(MODEL_ID)
+    for model in models:
+        try:
+            audio_iter = client.text_to_speech.convert(
+                text=text, voice_id=voice_id or DEFAULT_VOICE_ID,
+                model_id=model, output_format="mp3_44100_128")
+            buf = BytesIO()
+            for chunk in audio_iter:
+                buf.write(chunk)
+            return buf.getvalue()
+        except Exception as e:
+            logger.warning("TTS %s failed for %s: %s", model, language, e)
+    return None
 
 
-def speak_b64(text: str, voice_id: str | None = None) -> str | None:
-    """Like speak() but returns a base64-encoded data URI for embedding in HTML."""
-    audio = speak(text, voice_id)
+def speak_b64(text: str, voice_id: str | None = None, language: str = "English") -> str | None:
+    audio = speak(text, voice_id, language)
     if audio is None:
         return None
     return "data:audio/mpeg;base64," + base64.b64encode(audio).decode()
 
 
 def autoplay_audio_html(audio_b64: str) -> str:
-    """Return an HTML snippet that auto-plays a base64 audio clip."""
     return f"""
     <audio autoplay>
       <source src="{audio_b64}" type="audio/mpeg">
     </audio>"""
-
-

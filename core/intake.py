@@ -16,41 +16,27 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 CORE_QUESTIONS: list[tuple[str, str]] = [
-    ("narrative", "Tell me what happened, in your own words. Start wherever it makes sense to you."),
-    ("when", "When did this happen? An exact date helps, because many claims have strict deadlines."),
-    ("where", "Where did it happen? City, borough, and the specific place if you know it."),
-    ("who", "Who else was involved? A person, a company, an agency, a landlord, an employer?"),
-    ("harm", "What harm resulted? Injuries, money lost, property damaged, status affected?"),
-    ("evidence", "What records do you have? Photos, reports, emails, medical papers, witnesses?"),
-    ("actions_taken", "What have you already done about it? Reports filed, calls made, letters sent?"),
-    ("goal", "What outcome are you hoping for?"),
+    ("narrative", "Tell me about your immigration situation, in your own words. You only need to share what you are comfortable sharing."),
+    ("when", "When did you most recently arrive in the United States? If you have a letter or court paper, you can give the date on it instead."),
+    ("where", "Which borough or ZIP code do you live in now? This tells me which immigration court and local help apply."),
+    ("notices", "Have you received any papers from USCIS or the immigration court? What does it say at the top, and is there a date on it?"),
+    ("filed", "Have you or anyone helping you already sent any immigration application? Which one, if you know?"),
+    ("fear", "Are you afraid to return to your home country? You do not need to give details now."),
+    ("family", "Do you have close family in the U.S., like a spouse, parent, or child who is a citizen or green card holder?"),
+    ("helper", "Is anyone helping you with your case, like a lawyer, a legal aid group, or a notario?"),
+    ("goal", "What are you hoping for right now? For example, a work permit, protection, a green card, or understanding a court date."),
 ]
 
 AREA_QUESTIONS: dict[str, list[tuple[str, str]]] = {
-    "Torts / Personal Injury": [
-        ("public_entity", "Was a government agency or public authority involved, like the city, MTA, or NYCHA? Claims against them often have much shorter notice windows."),
-        ("medical", "Did you get medical treatment? Where, and when was the first visit?"),
-        ("report_number", "Was an incident or accident report made? Do you have a report number?"),
-    ],
-    "Workers Compensation": [
-        ("employer_notice", "Did you tell your employer about the injury? When, and in writing or verbally?"),
-        ("medical", "Have you seen a doctor about the injury, and did you say it was work related?"),
-    ],
     "Immigration": [
-        ("status", "What is your current immigration situation in general terms, and is there a deadline or notice date on any letter you received?"),
-        ("notices", "Have you received any notices from USCIS or immigration court? What do they say at the top?"),
-    ],
-    "Criminal": [
-        ("court_date", "Is there a court date? Which court?"),
-        ("counsel", "Do you have a lawyer or public defender assigned yet?"),
-    ],
-    "Housing / Landlord Tenant": [
-        ("lease", "Do you have a written lease? Is the unit rent stabilized, if you know?"),
-        ("notices", "Have you received any court papers or notices from the landlord? What dates are on them?"),
+        ("court_date", "If you have a court date, what is the date and which court? You can check at acis.eoir.justice.gov."),
+        ("documents", "What documents do you have with you, such as a passport, an I-94, letters, or court papers?"),
     ],
     "Employment": [
-        ("employer_size", "Roughly how many people work for the employer?"),
         ("documentation", "Do you have anything in writing, like texts, emails, pay stubs, or a termination letter?"),
+    ],
+    "Criminal": [
+        ("court_date", "Is there a criminal court date? Arrests can affect immigration cases, so a lawyer should know."),
     ],
 }
 
@@ -61,7 +47,9 @@ SLOT_LABELS = {
     "report_number": "Report #", "employer_notice": "Employer notice",
     "status": "Status", "notices": "Notices", "court_date": "Court date",
     "counsel": "Counsel", "lease": "Lease", "employer_size": "Employer size",
-    "documentation": "Documentation",
+    "documentation": "Documentation", "filed": "Applications filed",
+    "fear": "Fear of return", "family": "Family ties", "helper": "Who is helping",
+    "documents": "Documents",
 }
 
 
@@ -273,7 +261,8 @@ def list_known_entities() -> list[str]:
 _ADVICE_PATTERNS = [
     r"\bshould i\b", r"\bwill i win\b", r"\bhow much.*(worth|get|money)\b",
     r"\bdo i need a lawyer\b", r"\bwrite my\b", r"\bfile.*for me\b",
-    r"\bwhat should i do\b",
+    r"\bwhat should i do\b", r"\bwill i (get|be) deport", r"\bcan i stay\b",
+    r"\bwill i get (asylum|a green card|papers)\b",
 ]
 
 
@@ -295,8 +284,9 @@ def is_advice_seeking(text: str) -> bool:
 ADVICE_REFUSAL = (
     "I provide legal information, not legal advice. I can't tell you what to "
     "do, predict outcomes, or evaluate your case. For personalized guidance, "
-    "contact a licensed attorney or a free legal aid organization like "
-    "LawHelpNY (lawhelpny.org) or the NYC Bar Legal Referral Service."
+    "contact a licensed immigration attorney or a free, safe program like "
+    "ActionNYC (call 311 and say 'ActionNYC'). Avoid notarios: in the U.S. "
+    "they are not lawyers."
 )
 
 # ---------------------------------------------------------------------------
@@ -322,6 +312,13 @@ class CaseFile:
     resolved_entity: str | None = None
     entity_confirmed: bool = False
     entity_rejected: bool = False
+    language: str = "English"
+    dialect: dict = field(default_factory=dict)
+    original_answers: list[dict] = field(default_factory=list)   # person's own words
+    survey_answers: dict = field(default_factory=dict)
+    stage_report: dict = field(default_factory=dict)
+    flashpoint: dict = field(default_factory=dict)              # community lens results
+    workflow: dict = field(default_factory=dict)                # firm workflow state
     folder: Path | None = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -338,8 +335,8 @@ class CaseFile:
         return a.area if hasattr(a, "area") else a.get("area")
 
     def question_queue(self) -> list[tuple[str, str]]:
-        queue = list(CORE_QUESTIONS)
-        if self.primary_area in AREA_QUESTIONS:
+        queue = list(CORE_QUESTIONS) + AREA_QUESTIONS["Immigration"]
+        if self.primary_area in AREA_QUESTIONS and self.primary_area != "Immigration":
             queue += AREA_QUESTIONS[self.primary_area]
         return queue
 
@@ -374,6 +371,13 @@ class CaseFile:
             "when_iso": self.when_iso,
             "resolved_entity": self.resolved_entity,
             "entity_confirmed": self.entity_confirmed,
+            "language": self.language,
+            "dialect": self.dialect,
+            "original_answers": self.original_answers,
+            "survey_answers": self.survey_answers,
+            "stage_report": self.stage_report,
+            "flashpoint": self.flashpoint,
+            "workflow": self.workflow,
         }
         out = self.folder / "case.json"
         out.write_text(json.dumps(data, indent=2, ensure_ascii=False))
