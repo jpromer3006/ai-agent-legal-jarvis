@@ -6,3 +6,8 @@ cases/
 cache/
 *.pyc
 .DS_Store
+.env.*
+!.env.example
+
+# Your own ElevenLabs agent id (created by tools/create_voice_agent.py)
+data/voice_agent.json
